@@ -51,9 +51,13 @@ For all orchestrated non-trivial work, maintain durable artifacts in relative pr
 ## 6. FAN-IN & FORENSIC REVIEW
 When a Worker reports task completion:
 1. Audit the candidate diff (`git diff HEAD~1`) for zero scope leakage, clean error handling, and zero AI slop.
-2. Execute the verification test suite directly in the worktree environment.
-3. Perform a sequential, non-fast-forward merge back to the target integration branch (`git merge --no-ff`).
-4. Clean up the ephemeral worktree (`git worktree remove`) or quarantine upon failure (`.quarantine/`).
+2. Execute automated fan-in using `acc_fanin_worker`:
+   - `targetDir`: Path to the candidate worker's Git Worktree.
+   - `testCommand`: Verification test command (defaults to `npm test`).
+   - `targetBranch`: Target integration branch (defaults to `master`).
+   - `report`: Optional structured Worker Completion Report conforming to `WorkerCompletionReportSchema`.
+3. If tests pass, `acc_fanin_worker` merges the branch with `--no-ff`, deletes the worktree, and returns the commit hash and test output.
+4. If verification fails, `acc_fanin_worker` automatically quarantines the worktree to `.worktrees-quarantine/` for post-mortem forensics without merging.
 
 ## 7. SELF-IDENTITY & SESSION TITLE MANAGEMENT
 - The Master session MUST establish and maintain self-identity starting with `[MASTER]`.
