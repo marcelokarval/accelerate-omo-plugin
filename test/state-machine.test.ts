@@ -13,11 +13,15 @@ describe("StateMachineService & Fail-Closed Dispatch (Task 6)", () => {
     client = new OpenCodeClient({ baseUrl: "http://localhost:4096" });
 
     vi.spyOn(worktreeService, "create").mockResolvedValue({
-      worktreePath: "/tmp/worktree-123",
-      branchName: "accelerate/task-1-123",
+      path: "/tmp/worktree-123",
+      branch: "accelerate/task-1-123",
+      baseRef: "HEAD",
     });
-    vi.spyOn(worktreeService, "remove").mockResolvedValue();
-    vi.spyOn(worktreeService, "quarantine").mockResolvedValue("/tmp/quarantine/worktree-123");
+    vi.spyOn(worktreeService, "remove").mockResolvedValue({ path: "/tmp/worktree-123" });
+    vi.spyOn(worktreeService, "quarantine").mockResolvedValue({
+      originalPath: "/tmp/worktree-123",
+      quarantinedPath: "/tmp/quarantine/worktree-123",
+    });
 
     vi.spyOn(client, "createSession").mockResolvedValue({
       id: "ses_test_123",
@@ -46,7 +50,7 @@ describe("StateMachineService & Fail-Closed Dispatch (Task 6)", () => {
 
     const result = await stateMachine.dispatchWorker({
       taskSlug: "stripe-adapter",
-      repoPath: "/repo",
+      targetDir: "/tmp/worktree-123",
       baseRef: "HEAD",
       prompt: "Implement adapter",
     });
@@ -56,7 +60,11 @@ describe("StateMachineService & Fail-Closed Dispatch (Task 6)", () => {
     expect(result.worktreePath).toBe("/tmp/worktree-123");
     expect(stateMachine.getPhase()).toBe("EXECUTING");
 
-    expect(worktreeService.create).toHaveBeenCalled();
+    expect(worktreeService.create).toHaveBeenCalledWith({
+      path: "/tmp/worktree-123",
+      branch: expect.stringContaining("accelerate/stripe-adapter-"),
+      baseRef: "HEAD",
+    });
     expect(client.createSession).toHaveBeenCalled();
     expect(client.prompt).toHaveBeenCalledWith("ses_test_123", "Implement adapter");
   });
@@ -67,13 +75,16 @@ describe("StateMachineService & Fail-Closed Dispatch (Task 6)", () => {
 
     const result = await stateMachine.dispatchWorker({
       taskSlug: "broken-task",
-      repoPath: "/repo",
+      targetDir: "/tmp/worktree-123",
       baseRef: "HEAD",
       prompt: "broken",
     });
 
     expect(result.status).toBe("error");
     expect(stateMachine.getPhase()).toBe("FAILED");
-    expect(worktreeService.quarantine).toHaveBeenCalledWith("/tmp/worktree-123");
+    expect(worktreeService.quarantine).toHaveBeenCalledWith({
+      path: "/tmp/worktree-123",
+      reason: "dispatch_failure",
+    });
   });
 });

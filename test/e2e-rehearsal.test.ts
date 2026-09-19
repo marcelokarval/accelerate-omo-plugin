@@ -23,7 +23,7 @@ describe("Task 8: End-to-End Orchestration Rehearsal (P4Y-74 Task 8 Simulation)"
       branch: "accelerate/p4y-74-w1-task-8",
       baseRef: "HEAD",
     });
-    vi.spyOn(worktreeService, "remove").mockResolvedValue();
+    vi.spyOn(worktreeService, "remove").mockResolvedValue({ path: "/tmp/rehearsal-worktree-p4y-w8" });
     vi.spyOn(client, "createSession").mockResolvedValue({
       id: "ses_worker_rehearsal_8",
       directory: "/tmp/rehearsal-worktree-p4y-w8",
@@ -47,7 +47,7 @@ describe("Task 8: End-to-End Orchestration Rehearsal (P4Y-74 Task 8 Simulation)"
     // 4. Disparo do Worker W-8 (Task 8: Stripe Adapter)
     const dispatchResult = await stateMachine.dispatchWorker({
       taskSlug: "p4y-w8-stripe-adapter",
-      repoPath: "/home/marcelo-karval/Backup/Projetos/prop4you/prop4you-v2",
+      targetDir: "/tmp/rehearsal-worktree-p4y-w8",
       baseRef: "HEAD",
       prompt: "Implement dj-stripe 2.11 adapter following strict TDD against PG18.",
     });

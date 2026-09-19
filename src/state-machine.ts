@@ -12,8 +12,8 @@ export type SessionPhase =
 
 export interface WorkerDispatchConfig {
   taskSlug: string;
-  repoPath: string;
-  baseRef: string;
+  targetDir: string;
+  baseRef?: string;
   prompt: string;
   timeoutMs?: number;
 }
@@ -79,9 +79,9 @@ export class StateMachineService {
 
     try {
       worktreeResult = await this.worktreeService.create({
-        repoPath: config.repoPath,
+        path: config.targetDir,
         branch: branchName,
-        baseRef: config.baseRef,
+        baseRef: config.baseRef || "HEAD",
       });
     } catch (err: any) {
       this.transitionTo("FAILED");
@@ -100,7 +100,7 @@ export class StateMachineService {
         title: `⚡ [W-${config.taskSlug}] Isolated Task Execution`,
       });
     } catch (err: any) {
-      await this.worktreeService.remove(worktreePath);
+      await this.worktreeService.remove({ path: worktreePath, force: true });
       this.transitionTo("FAILED");
       return {
         status: "error",
@@ -120,7 +120,7 @@ export class StateMachineService {
       };
     } catch (err: any) {
       // Em falhas de despacho, aplica quarentena
-      await this.worktreeService.quarantine(worktreePath);
+      await this.worktreeService.quarantine({ path: worktreePath, reason: "dispatch_failure" });
       this.transitionTo("FAILED");
       return {
         status: "error",
