@@ -87,15 +87,36 @@ export class PersonaManager {
     return this.sessionPersonas.get(sessionId) ?? "standard";
   }
 
-  /**
-   * Evaluates if a given tool can be executed by the session's active persona.
-   * Master sessions are blocked from directly mutating source code files.
-   */
-  public isToolAllowed(sessionId: string, toolName: string): boolean {
+  public isGovernancePath(filePath: string): boolean {
+    if (!filePath) return false;
+    const normalized = filePath.replace(/\\/g, "/");
+    return (
+      normalized.startsWith("docs/plans/") ||
+      normalized.startsWith("docs/architecture/") ||
+      normalized.startsWith("docs/tasks/") ||
+      normalized.startsWith("docs/reports/") ||
+      normalized.startsWith(".accelerate/") ||
+      normalized.includes("/docs/plans/") ||
+      normalized.includes("/docs/architecture/") ||
+      normalized.includes("/docs/tasks/") ||
+      normalized.includes("/docs/reports/") ||
+      normalized.includes("/.accelerate/")
+    );
+  }
+
+  public isToolAllowed(
+    sessionId: string,
+    toolName: string,
+    args?: Record<string, any>
+  ): boolean {
     const persona = this.getSessionPersona(sessionId);
     if (persona === "master") {
-      const blockedForMaster = ["edit", "write", "apply_patch"];
-      if (blockedForMaster.includes(toolName)) {
+      const mutatingTools = ["edit", "write", "apply_patch"];
+      if (mutatingTools.includes(toolName)) {
+        const targetPath = args?.filePath || args?.path || "";
+        if (this.isGovernancePath(targetPath)) {
+          return true;
+        }
         return false;
       }
     }

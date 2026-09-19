@@ -172,8 +172,9 @@ export const AccelerateOmoPlugin: Plugin = async (_context) => {
      */
     "tool.execute.before": async (input, _output) => {
       const { tool: toolName, sessionID } = input;
+      const toolArgs = (input as any).args ?? (input as any).parameters;
       await personaManager.resolveSessionPersona(sessionID, openCodeClient);
-      if (!personaManager.isToolAllowed(sessionID, toolName)) {
+      if (!personaManager.isToolAllowed(sessionID, toolName, toolArgs)) {
         throw new Error(
           `[ACCELERATE PERMISSION DENIED] Session is registered as [MASTER]. Direct code modification tool '${toolName}' is blocked by policy. You must dispatch an isolated Worker session.`
         );

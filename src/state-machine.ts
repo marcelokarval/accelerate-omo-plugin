@@ -87,7 +87,7 @@ export class StateMachineService {
     const triggerMessageId = config.triggerMessageId || "msg_unknown";
 
     if (!config.specPath || !existsSync(config.specPath)) {
-      this.transitionTo("FAILED");
+      if (this.currentPhase !== "FAILED") this.transitionTo("FAILED");
       return {
         status: "error",
         provenance: {
@@ -112,7 +112,7 @@ export class StateMachineService {
         baseRef: config.baseRef || "HEAD",
       });
     } catch (err: any) {
-      this.transitionTo("FAILED");
+      if (this.currentPhase !== "FAILED") this.transitionTo("FAILED");
       return {
         status: "error",
         provenance: {
@@ -135,7 +135,7 @@ export class StateMachineService {
       });
     } catch (err: any) {
       await this.worktreeService.remove({ path: worktreePath, force: true });
-      this.transitionTo("FAILED");
+      if (this.currentPhase !== "FAILED") this.transitionTo("FAILED");
       return {
         status: "error",
         provenance: {
@@ -170,7 +170,7 @@ export class StateMachineService {
       };
     } catch (err: any) {
       await this.worktreeService.quarantine({ path: worktreePath, reason: "dispatch_failure" });
-      this.transitionTo("FAILED");
+      if (this.currentPhase !== "FAILED") this.transitionTo("FAILED");
       return {
         status: "error",
         worktreePath,
