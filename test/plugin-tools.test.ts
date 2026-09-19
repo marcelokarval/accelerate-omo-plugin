@@ -119,7 +119,7 @@ describe("Plugin Registered Tools (acc_dispatch_worker & acc_approve_plane_sync)
 
       expect(result).toBeDefined();
       const parsed = JSON.parse(result);
-      expect(parsed.status).toBe("dispatched");
+      expect(parsed.status).toBe("success");
       expect(parsed.provenance?.delegationId).toBeDefined();
     } finally {
       if (fs.existsSync(tempSpec)) fs.unlinkSync(tempSpec);
