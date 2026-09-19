@@ -16,14 +16,16 @@ export class PersonaManager {
   }
 
   /**
-   * Identifies persona from session title or metadata string
+   * Identifies persona from session title or metadata string.
+   * Tolerates leading emojis, spaces, and brackets.
    */
   public detectPersonaFromTitle(title: string): SessionPersona {
-    const trimmed = title.trim().toUpperCase();
-    if (trimmed.startsWith("[MASTER]") || trimmed.includes("[MASTER]")) {
+    const upper = title.trim().toUpperCase();
+    if (upper.includes("[MASTER]")) {
       return "master";
     }
-    if (trimmed.startsWith("[W-") || trimmed.includes("[WORKER]")) {
+    // Suporta "[W-", "[WORKER]" e prefixos com emoji como "⚡ [W-8]"
+    if (/\[W-\d+\]/i.test(title) || upper.includes("[WORKER]") || /\[W-/i.test(title)) {
       return "worker";
     }
     return "standard";
