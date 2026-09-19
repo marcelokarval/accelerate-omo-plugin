@@ -1,5 +1,6 @@
 import { readFileSync, existsSync } from "node:fs";
-import { join } from "node:path";
+import { join, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
 
 export type SessionPersona = "master" | "worker" | "standard";
 
@@ -7,12 +8,16 @@ export interface PersonaManagerOptions {
   skillsDir?: string;
 }
 
+const currentDir = typeof __dirname !== "undefined"
+  ? __dirname
+  : dirname(fileURLToPath(import.meta.url));
+
 export class PersonaManager {
   private skillsDir: string;
   private sessionPersonas: Map<string, SessionPersona> = new Map();
 
   constructor(options?: PersonaManagerOptions) {
-    this.skillsDir = options?.skillsDir ?? join(__dirname, "../skills");
+    this.skillsDir = options?.skillsDir ?? join(currentDir, "../skills");
   }
 
   /**
@@ -40,32 +45,32 @@ export class PersonaManager {
   }
 
   /**
-   * Loads the strict markdown rules for a given persona
-   */
-  public getPersonaInstructions(persona: SessionPersona): string {
-    if (persona === "master") {
-      const file = join(this.skillsDir, "acc-master.md");
-      return existsSync(file) ? readFileSync(file, "utf8") : "";
-    }
-    if (persona === "worker") {
-      const file = join(this.skillsDir, "acc-worker.md");
-      return existsSync(file) ? readFileSync(file, "utf8") : "";
-    }
-    return "";
-  }
-
-  /**
-   * Tool fencing rule: Master cannot edit product code
+   * Evaluates if a given tool can be executed by the session's active persona.
+   * Master sessions are blocked from directly mutating source code files.
    */
   public isToolAllowed(sessionId: string, toolName: string): boolean {
     const persona = this.getSessionPersona(sessionId);
     if (persona === "master") {
-      // Forbidden mutating tools for Master
-      const blockedTools = ["edit", "write", "apply_patch"];
-      if (blockedTools.includes(toolName.toLowerCase())) {
+      const blockedForMaster = ["edit", "write", "apply_patch"];
+      if (blockedForMaster.includes(toolName)) {
         return false;
       }
     }
     return true;
+  }
+
+  /**
+   * Reads the governance Markdown instructions for the designated persona.
+   */
+  public getPersonaInstructions(persona: SessionPersona): string {
+    if (persona === "standard") return "";
+    const fileName = persona === "master" ? "acc-master.md" : "acc-worker.md";
+    const filePath = join(this.skillsDir, fileName);
+
+    if (!existsSync(filePath)) {
+      return "";
+    }
+
+    return readFileSync(filePath, "utf-8");
   }
 }
