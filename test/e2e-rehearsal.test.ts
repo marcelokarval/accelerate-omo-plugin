@@ -48,13 +48,21 @@ describe("Task 8: End-to-End Orchestration Rehearsal (P4Y-74 Task 8 Simulation)"
     const dispatchResult = await stateMachine.dispatchWorker({
       taskSlug: "p4y-w8-stripe-adapter",
       targetDir: "/tmp/rehearsal-worktree-p4y-w8",
+      specPath: "package.json",
       baseRef: "HEAD",
       prompt: "Implement dj-stripe 2.11 adapter following strict TDD against PG18.",
+      masterSessionId: "session-master-main",
+      triggerMessageId: "msg-dispatch-task-8",
     });
 
     expect(dispatchResult.status).toBe("success");
     expect(dispatchResult.sessionId).toBe("ses_worker_rehearsal_8");
     expect(dispatchResult.worktreePath).toBe("/tmp/rehearsal-worktree-p4y-w8");
+    expect(dispatchResult.provenance).toBeDefined();
+    expect(dispatchResult.provenance?.delegationId).toMatch(/^del_[0-9a-f]{8}$/);
+    expect(dispatchResult.provenance?.masterSessionId).toBe("session-master-main");
+    expect(dispatchResult.provenance?.triggerMessageId).toBe("msg-dispatch-task-8");
+    expect(dispatchResult.provenance?.workerSessionId).toBe("ses_worker_rehearsal_8");
     expect(stateMachine.getPhase()).toBe("EXECUTING");
 
     // 5. Worker atua no seu próprio ambiente

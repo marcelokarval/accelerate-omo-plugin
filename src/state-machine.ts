@@ -1,3 +1,5 @@
+import { existsSync } from "node:fs";
+import { randomBytes } from "node:crypto";
 import { GitWorktreeService } from "./git-worktree.js";
 import { OpenCodeClient } from "./opencode-client.js";
 
@@ -10,11 +12,22 @@ export type SessionPhase =
   | "COMPLETED"
   | "FAILED";
 
+export interface ProvenanceEnvelope {
+  delegationId: string;
+  masterSessionId: string;
+  triggerMessageId: string;
+  workerSessionId?: string;
+  timestamp: string;
+}
+
 export interface WorkerDispatchConfig {
   taskSlug: string;
   targetDir: string;
+  specPath: string;
   baseRef?: string;
   prompt: string;
+  masterSessionId?: string;
+  triggerMessageId?: string;
   timeoutMs?: number;
 }
 
@@ -23,6 +36,8 @@ export interface WorkerRunResult {
   worktreePath?: string;
   branchName?: string;
   sessionId?: string;
+  specPath?: string;
+  provenance?: ProvenanceEnvelope;
   error?: string;
 }
 
@@ -64,14 +79,25 @@ export class StateMachineService {
     this.currentPhase = nextPhase;
   }
 
-  /**
-   * Dispatches an isolated worker session:
-   * 1. Creates dedicated git worktree
-   * 2. Spawns asynchronous OpenCode session
-   * 3. Dispatches prompt via prompt/sendPrompt
-   * 4. If timeout occurs, automatically moves worktree to quarantine (Fail-Closed)
-   */
   public async dispatchWorker(config: WorkerDispatchConfig): Promise<WorkerRunResult> {
+    const delegationId = `del_${randomBytes(4).toString("hex")}`;
+    const masterSessionId = config.masterSessionId || "ses_unknown";
+    const triggerMessageId = config.triggerMessageId || "msg_unknown";
+
+    if (!config.specPath || !existsSync(config.specPath)) {
+      this.transitionTo("FAILED");
+      return {
+        status: "error",
+        provenance: {
+          delegationId,
+          masterSessionId,
+          triggerMessageId,
+          timestamp: new Date().toISOString(),
+        },
+        error: `[ACCELERATE SPECIFICATION REQUIRED] Specification artifact at '${config.specPath}' does not exist. Master must author PRD/ADR/SDD before dispatching workers.`,
+      };
+    }
+
     this.transitionTo("DISPATCHING");
 
     const branchName = `accelerate/${config.taskSlug}-${Date.now().toString().slice(-4)}`;
@@ -87,6 +113,12 @@ export class StateMachineService {
       this.transitionTo("FAILED");
       return {
         status: "error",
+        provenance: {
+          delegationId,
+          masterSessionId,
+          triggerMessageId,
+          timestamp: new Date().toISOString(),
+        },
         error: `Failed to provision git worktree: ${err?.message || err}`,
       };
     }
@@ -104,9 +136,23 @@ export class StateMachineService {
       this.transitionTo("FAILED");
       return {
         status: "error",
+        provenance: {
+          delegationId,
+          masterSessionId,
+          triggerMessageId,
+          timestamp: new Date().toISOString(),
+        },
         error: `Failed to create OpenCode session: ${err?.message || err}`,
       };
     }
+
+    const provenance: ProvenanceEnvelope = {
+      delegationId,
+      masterSessionId,
+      triggerMessageId,
+      workerSessionId: session.id,
+      timestamp: new Date().toISOString(),
+    };
 
     try {
       await this.openCodeClient.prompt(session.id, config.prompt);
@@ -117,9 +163,10 @@ export class StateMachineService {
         worktreePath,
         branchName,
         sessionId: session.id,
+        specPath: config.specPath,
+        provenance,
       };
     } catch (err: any) {
-      // Em falhas de despacho, aplica quarentena
       await this.worktreeService.quarantine({ path: worktreePath, reason: "dispatch_failure" });
       this.transitionTo("FAILED");
       return {
@@ -127,6 +174,8 @@ export class StateMachineService {
         worktreePath,
         branchName,
         sessionId: session.id,
+        specPath: config.specPath,
+        provenance,
         error: `Failed to dispatch prompt: ${err?.message || err}`,
       };
     }

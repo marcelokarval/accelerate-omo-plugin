@@ -1,5 +1,13 @@
 export type PlaneLifecyclePhase = "START" | "PROGRESS" | "BLOCKED" | "REVIEW" | "FINISH";
 
+export interface PlaneProvenanceEnvelope {
+  delegationId?: string;
+  masterSessionId?: string;
+  triggerMessageId?: string;
+  workerSessionId?: string;
+  timestamp: string;
+}
+
 export interface PlaneTransitionPayload {
   workspaceSlug: string;
   projectId: string;
@@ -10,6 +18,7 @@ export interface PlaneTransitionPayload {
   idempotencyKey: string;
   commentHtml: string;
   isHumanApproved: boolean;
+  provenance?: PlaneProvenanceEnvelope;
 }
 
 export interface PlaneTransitionReceipt {
@@ -17,43 +26,46 @@ export interface PlaneTransitionReceipt {
   payload: PlaneTransitionPayload;
   formattedReceiptMarkdown: string;
   requiresHumanApproval: boolean;
+  provenance?: PlaneProvenanceEnvelope;
   error?: string;
 }
 
 export class PlaneApprovalGateService {
-  /**
-   * Determina se uma fase exige aprovação humana explícita.
-   * Regra Prática: Apenas START (início da tarefa) e FINISH (conclusão/done pós-review) exigem aprovação humana.
-   * Fases intermediárias (PROGRESS, BLOCKED, REVIEW) fluem automaticamente pelo Master sem parar o fluxo.
-   */
   public requiresHumanGate(phase: PlaneLifecyclePhase): boolean {
     return phase === "START" || phase === "FINISH";
   }
 
-  /**
-   * Prepares a lifecycle transition payload.
-   * Se for START ou FINISH, entra em pending_human_approval.
-   * Se for fase intermediária (PROGRESS, BLOCKED, REVIEW), é auto-aprovada para despacho.
-   */
   public prepareTransitionReceipt(
     phase: PlaneLifecyclePhase,
     payload: Omit<PlaneTransitionPayload, "isHumanApproved">
   ): PlaneTransitionReceipt {
     const needsApproval = this.requiresHumanGate(phase);
 
-    const receiptMarkdown = [
+    const receiptLines = [
       `### 🛡️ [PLANE MUTATION GATE] Proposed Transition: ${phase}`,
       `- **Work Item ID**: \`${payload.workItemId}\``,
       `- **Project**: \`${payload.projectId}\``,
       `- **Target State**: \`${payload.targetStateId}\``,
       `- **Requires Human Approval**: \`${needsApproval}\``,
       `- **Idempotency Key**: \`${payload.idempotencyKey}\``,
+    ];
+
+    if (payload.provenance) {
+      if (payload.provenance.delegationId) receiptLines.push(`- **Delegation ID**: \`${payload.provenance.delegationId}\``);
+      if (payload.provenance.masterSessionId) receiptLines.push(`- **Master Session**: \`${payload.provenance.masterSessionId}\``);
+      if (payload.provenance.triggerMessageId) receiptLines.push(`- **Trigger Message**: \`${payload.provenance.triggerMessageId}\``);
+      if (payload.provenance.workerSessionId) receiptLines.push(`- **Worker Session**: \`${payload.provenance.workerSessionId}\``);
+    }
+
+    receiptLines.push(
       `\n**Rendered Lifecycle Comment Preview**:`,
       `> ${payload.commentHtml.replace(/\n/g, "\n> ")}`,
       needsApproval
         ? `\n*Notice: Automated network mutations are blocked by policy. Human operator must approve transmission.*`
-        : `\n*Notice: Automated intermediate transition. Dispatched automatically by Master.*`,
-    ].join("\n");
+        : `\n*Notice: Automated intermediate transition. Dispatched automatically by Master.*`
+    );
+
+    const formattedReceiptMarkdown = receiptLines.join("\n");
 
     if (!needsApproval) {
       return {
@@ -62,8 +74,9 @@ export class PlaneApprovalGateService {
           ...payload,
           isHumanApproved: true,
         },
-        formattedReceiptMarkdown: receiptMarkdown,
+        formattedReceiptMarkdown,
         requiresHumanApproval: false,
+        provenance: payload.provenance,
       };
     }
 
@@ -73,16 +86,12 @@ export class PlaneApprovalGateService {
         ...payload,
         isHumanApproved: false,
       },
-      formattedReceiptMarkdown: receiptMarkdown,
+      formattedReceiptMarkdown,
       requiresHumanApproval: true,
+      provenance: payload.provenance,
     };
   }
 
-  /**
-   * Avalia a transição para despacho ao Plane.
-   * Se a fase não exigir aprovação humana, libera direto.
-   * Se exigir (START ou FINISH), valida o flag humanApproved.
-   */
   public authorizeTransition(
     receipt: PlaneTransitionReceipt,
     humanApproved: boolean
