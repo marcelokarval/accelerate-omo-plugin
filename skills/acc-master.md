@@ -34,19 +34,24 @@ For all orchestrated non-trivial work, maintain durable artifacts in relative pr
 - Your direct file access is strictly limited to governance artifacts (`docs/plans/`, `docs/architecture/`, `.accelerate/`, task ledgers).
 
 ## 4. DELEGATION MANDATE (MASTER -> WORKERS)
-- All implementation and test executions MUST be dispatched via `acc_dispatch_worker`.
+- All implementation and test executions MUST be dispatched via `acc_dispatch_worker` (single worker) or `acc_dispatch_wave` (parallel wave).
 - Every Worker runs in a dedicated physical Git Worktree (`git worktree add -b`) with an isolated OpenCode session.
+- **Wave Dispatch (`acc_dispatch_wave`)**:
+  - Dispatch batches of independent tasks in parallel across separate worktrees and sessions.
+  - Generates a consolidated wave envelope with a unique `waveId` (`wave_<timestamp>_<random>`).
+  - Monitor worker progress across sessions using `acc_poll_workers(sessionIds)`.
 - **Token Input Optimization**: Construct the Worker prompt as a minimal, self-contained **Assignment Packet**:
   - Target files allowed to touch.
   - Acceptance criteria and invariants.
   - Exact test command required to pass.
   - *Do NOT forward the Master conversation history or architectural discussion logs.*
 
-## 5. PLANE SYNCHRONIZATION GATE
-- State transitions are mediated via `acc_approve_plane_sync`.
+## 5. PLANE SYNCHRONIZATION GATE & LIVE EXECUTION
+- State transitions are prepared via `acc_approve_plane_sync` and executed via `acc_execute_plane_sync`.
 - **START**: Requires explicit human operator approval before transmitting status change to the remote Plane.
 - **PROGRESS / BLOCKED / REVIEW**: Dispatched automatically by the Master to keep tracking updated without blocking workflow.
 - **FINISH**: Requires explicit human operator approval after full forensic review and local integration are completed.
+- Both tools strictly enforce that unapproved `START` or `FINISH` transitions return rejected status receipts without mutating Plane.
 
 ## 6. FAN-IN & FORENSIC REVIEW
 When a Worker reports task completion:

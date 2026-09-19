@@ -125,3 +125,13 @@ export class PlaneApprovalGateService {
     };
   }
 }
+
+export interface PlaneExecutionReceipt {
+  status: "success" | "rejected" | "error";
+  executed: boolean;
+  phase: PlaneLifecyclePhase;
+  requiresHumanApproval?: boolean;
+  error?: string;
+  receipt?: PlaneTransitionReceipt;
+}
+

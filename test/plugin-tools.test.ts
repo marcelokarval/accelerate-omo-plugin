@@ -348,4 +348,246 @@ describe("Plugin Registered Tools (acc_dispatch_worker & acc_approve_plane_sync)
     });
   });
 
+  describe("Wave 3: acc_dispatch_wave, acc_poll_workers, and acc_execute_plane_sync", () => {
+    describe("acc_dispatch_wave", () => {
+      it("should register acc_dispatch_wave tool", async () => {
+        const hooks = await AccelerateOmoPlugin({} as any);
+        expect(hooks.tool?.acc_dispatch_wave).toBeDefined();
+      });
+
+      it("should validate tasks array and dispatch tasks in parallel across worktrees and sessions", async () => {
+        const mockStateMachine = {
+          getPhase: vi.fn().mockReturnValue("SPEC_READY"),
+          transitionTo: vi.fn(),
+          dispatchWorker: vi.fn().mockImplementation(async (config: any) => {
+            return {
+              status: "success",
+              worktreePath: config.targetDir,
+              branchName: `accelerate/${config.taskSlug}`,
+              sessionId: `ses_${config.taskSlug}`,
+              provenance: {
+                delegationId: `del_${config.taskSlug}`,
+                masterSessionId: config.masterSessionId,
+                triggerMessageId: config.triggerMessageId,
+                timestamp: new Date().toISOString(),
+              },
+            };
+          }),
+        };
+
+        const hooks = await AccelerateOmoPlugin({} as any, {
+          stateMachine: mockStateMachine as any,
+        });
+        const dispatchWaveTool = hooks.tool?.acc_dispatch_wave;
+
+        const resStr = await dispatchWaveTool?.execute(
+          {
+            waveSlug: "wave-1-core",
+            tasks: [
+              {
+                taskSlug: "task-1",
+                targetDir: "/tmp/wt-task-1",
+                specPath: "docs/spec1.md",
+                prompt: "Implement task 1",
+              },
+              {
+                taskSlug: "task-2",
+                targetDir: "/tmp/wt-task-2",
+                specPath: "docs/spec2.md",
+                prompt: "Implement task 2",
+                baseRef: "HEAD",
+              },
+            ],
+          },
+          { sessionID: "ses_master_wave", messageID: "msg_wave" } as any
+        );
+
+        const result = JSON.parse(resStr);
+        expect(result.status).toBe("success");
+        expect(result.waveSlug).toBe("wave-1-core");
+        expect(result.waveId).toMatch(/^wave_\d+_/);
+        expect(result.dispatchedCount).toBe(2);
+        expect(result.workers).toHaveLength(2);
+        expect(result.workers[0].taskSlug).toBe("task-1");
+        expect(result.workers[0].sessionId).toBe("ses_task-1");
+        expect(result.workers[0].worktreePath).toBe("/tmp/wt-task-1");
+        expect(result.workers[1].taskSlug).toBe("task-2");
+        expect(result.workers[1].sessionId).toBe("ses_task-2");
+
+        expect(mockStateMachine.dispatchWorker).toHaveBeenCalledTimes(2);
+      });
+
+      it("should reject acc_dispatch_wave if called from worker session (anti-recursion)", async () => {
+        const mockPersonaManager = {
+          getSessionPersona: vi.fn().mockReturnValue("worker"),
+          resolveSessionPersona: vi.fn().mockResolvedValue("worker"),
+        };
+        const hooks = await AccelerateOmoPlugin({} as any, {
+          personaManager: mockPersonaManager as any,
+        });
+        const dispatchWaveTool = hooks.tool?.acc_dispatch_wave;
+
+        await expect(
+          dispatchWaveTool?.execute(
+            {
+              waveSlug: "wave-recursion",
+              tasks: [
+                {
+                  taskSlug: "task-rec",
+                  targetDir: "/tmp/wt-rec",
+                  specPath: "docs/spec.md",
+                  prompt: "Do work",
+                },
+              ],
+            },
+            { sessionID: "ses_worker_child" } as any
+          )
+        ).rejects.toThrow("[ACCELERATE RECURSION DENIED]");
+      });
+    });
+
+    describe("acc_poll_workers", () => {
+      it("should register acc_poll_workers tool", async () => {
+        const hooks = await AccelerateOmoPlugin({} as any);
+        expect(hooks.tool?.acc_poll_workers).toBeDefined();
+      });
+
+      it("should query openCodeClient.getSession for each session ID and return worker status summaries", async () => {
+        const mockOpenCodeClient = {
+          getSession: vi.fn().mockImplementation(async (sessionId: string) => {
+            if (sessionId === "ses_active_1") {
+              return {
+                id: "ses_active_1",
+                title: "⚡ [W-task1] Working",
+                status: "busy",
+                messages: [{ id: "m1" }, { id: "m2" }],
+              };
+            }
+            if (sessionId === "ses_done_2") {
+              return {
+                id: "ses_done_2",
+                title: "⚡ [W-task2] Finished",
+                status: "idle",
+                messages: [{ id: "m1" }, { id: "m2" }, { id: "m3" }],
+              };
+            }
+            return null;
+          }),
+        };
+
+        const hooks = await AccelerateOmoPlugin({} as any, {
+          openCodeClient: mockOpenCodeClient as any,
+        });
+        const pollTool = hooks.tool?.acc_poll_workers;
+
+        const resStr = await pollTool?.execute({
+          sessionIds: ["ses_active_1", "ses_done_2", "ses_non_existent"],
+        }, {} as any);
+
+        const result = JSON.parse(resStr);
+        expect(result.status).toBe("success");
+        expect(result.pollResults).toHaveLength(3);
+
+        expect(result.pollResults[0]).toEqual({
+          sessionId: "ses_active_1",
+          status: "busy",
+          title: "⚡ [W-task1] Working",
+          messageCount: 2,
+          exists: true,
+        });
+
+        expect(result.pollResults[1]).toEqual({
+          sessionId: "ses_done_2",
+          status: "idle",
+          title: "⚡ [W-task2] Finished",
+          messageCount: 3,
+          exists: true,
+        });
+
+        expect(result.pollResults[2]).toEqual({
+          sessionId: "ses_non_existent",
+          status: "unknown",
+          title: undefined,
+          messageCount: 0,
+          exists: false,
+        });
+      });
+    });
+
+    describe("acc_execute_plane_sync", () => {
+      it("should register acc_execute_plane_sync tool", async () => {
+        const hooks = await AccelerateOmoPlugin({} as any);
+        expect(hooks.tool?.acc_execute_plane_sync).toBeDefined();
+      });
+
+      it("should reject START or FINISH if not humanApproved", async () => {
+        const hooks = await AccelerateOmoPlugin({} as any);
+        const planeTool = hooks.tool?.acc_execute_plane_sync;
+
+        const baseArgs = {
+          workspaceSlug: "karval",
+          projectId: "proj-1",
+          workItemId: "issue-1",
+          targetStateId: "state-in-progress",
+          expectedCurrentStateId: "state-ready",
+          expectedUpdatedAt: "2026-09-18T20:00:00Z",
+          idempotencyKey: "test-key-sync-1",
+          commentHtml: "<p>Starting wave execution</p>",
+          humanApproved: false,
+        };
+
+        const startResStr = await planeTool?.execute({ ...baseArgs, phase: "START" }, {} as any);
+        const startResult = JSON.parse(startResStr);
+        expect(startResult.status).toBe("rejected");
+        expect(startResult.requiresHumanApproval).toBe(true);
+        expect(startResult.error).toContain("Human operator rejected");
+
+        const finishResStr = await planeTool?.execute({ ...baseArgs, phase: "FINISH" }, {} as any);
+        const finishResult = JSON.parse(finishResStr);
+        expect(finishResult.status).toBe("rejected");
+        expect(finishResult.requiresHumanApproval).toBe(true);
+      });
+
+      it("should return approved live execution receipt when START/FINISH is humanApproved or for PROGRESS/BLOCKED/REVIEW", async () => {
+        const hooks = await AccelerateOmoPlugin({} as any);
+        const planeTool = hooks.tool?.acc_execute_plane_sync;
+
+        const baseArgs = {
+          workspaceSlug: "karval",
+          projectId: "proj-1",
+          workItemId: "issue-1",
+          targetStateId: "state-done",
+          expectedCurrentStateId: "state-review",
+          expectedUpdatedAt: "2026-09-18T20:00:00Z",
+          idempotencyKey: "test-key-sync-2",
+          commentHtml: "<p>Wave execution complete</p>",
+          humanApproved: true,
+          delegationId: "del_wave_done",
+          workerSessionId: "ses_wave_worker",
+        };
+
+        const resStr = await planeTool?.execute(
+          { ...baseArgs, phase: "FINISH" },
+          { sessionID: "ses_master", messageID: "msg_finish" } as any
+        );
+        const result = JSON.parse(resStr);
+        expect(result.status).toBe("success");
+        expect(result.executed).toBe(true);
+        expect(result.phase).toBe("FINISH");
+        expect(result.receipt).toBeDefined();
+        expect(result.receipt.status).toBe("approved_for_dispatch");
+        expect(result.receipt.payload.isHumanApproved).toBe(true);
+        expect(result.receipt.provenance.delegationId).toBe("del_wave_done");
+
+        const progResStr = await planeTool?.execute(
+          { ...baseArgs, phase: "PROGRESS", humanApproved: false },
+          {} as any
+        );
+        const progResult = JSON.parse(progResStr);
+        expect(progResult.status).toBe("success");
+        expect(progResult.executed).toBe(true);
+        expect(progResult.phase).toBe("PROGRESS");
+      });
+    });
+  });
 });

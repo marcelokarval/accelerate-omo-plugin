@@ -247,6 +247,185 @@ export const AccelerateOmoPlugin: Plugin = async (context, options?: AccelerateP
         );
       },
     }),
+
+    acc_dispatch_wave: tool({
+      description: "Dispatches a parallel wave of atomic workers across independent Git worktrees.",
+      args: {
+        waveSlug: z.string().describe("Slug for the wave (e.g. 'wave-1-core')"),
+        tasks: z.array(
+          z.object({
+            taskSlug: z.string(),
+            targetDir: z.string(),
+            specPath: z.string(),
+            prompt: z.string(),
+            baseRef: z.string().optional(),
+          })
+        ).min(1).describe("List of atomic tasks to dispatch in parallel"),
+      },
+      execute: async (args, context) => {
+        const masterSessionId = context?.sessionID || "";
+        const triggerMessageId = context?.messageID || "";
+        const persona = personaManager.getSessionPersona(masterSessionId);
+        if (persona === "worker") {
+          throw new Error("[ACCELERATE RECURSION DENIED] Workers are forbidden from dispatching child workers.");
+        }
+
+        const waveId = `wave_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
+
+        const dispatchPromises = args.tasks.map(async (task) => {
+          const resolvedSpecPath = path.isAbsolute(task.specPath)
+            ? task.specPath
+            : path.resolve(process.cwd(), task.specPath);
+
+          const result = await stateMachine.dispatchWorker({
+            taskSlug: task.taskSlug,
+            targetDir: task.targetDir,
+            specPath: resolvedSpecPath,
+            baseRef: task.baseRef || "HEAD",
+            prompt: task.prompt,
+            masterSessionId,
+            triggerMessageId,
+          });
+
+          return {
+            taskSlug: task.taskSlug,
+            targetDir: task.targetDir,
+            sessionId: result.sessionId,
+            worktreePath: result.worktreePath,
+            branchName: result.branchName,
+            status: result.status,
+            error: result.error,
+            provenance: result.provenance,
+          };
+        });
+
+        const workers = await Promise.all(dispatchPromises);
+
+        return JSON.stringify(
+          {
+            status: "success",
+            waveId,
+            waveSlug: args.waveSlug,
+            dispatchedCount: workers.length,
+            workers,
+          },
+          null,
+          2
+        );
+      },
+    }),
+
+    acc_poll_workers: tool({
+      description: "Polls active execution status of dispatched worker sessions.",
+      args: {
+        sessionIds: z.array(z.string()).min(1).describe("List of worker session IDs to check"),
+      },
+      execute: async (args) => {
+        const pollPromises = args.sessionIds.map(async (sessionId) => {
+          try {
+            const session = await openCodeClient.getSession(sessionId);
+            if (!session) {
+              return {
+                sessionId,
+                status: "unknown",
+                title: undefined,
+                messageCount: 0,
+                exists: false,
+              };
+            }
+
+            const messages = Array.isArray(session.messages) ? session.messages : [];
+            const rawStatus = session.status || (messages.length > 0 ? "idle" : "unknown");
+
+            return {
+              sessionId,
+              status: rawStatus,
+              title: session.title,
+              messageCount: messages.length,
+              exists: true,
+            };
+          } catch {
+            return {
+              sessionId,
+              status: "unknown",
+              title: undefined,
+              messageCount: 0,
+              exists: false,
+            };
+          }
+        });
+
+        const pollResults = await Promise.all(pollPromises);
+
+        return JSON.stringify(
+          {
+            status: "success",
+            pollResults,
+          },
+          null,
+          2
+        );
+      },
+    }),
+
+    acc_execute_plane_sync: tool({
+      description: "Executes a Plane state transition receipt. Enforces human approval for START and FINISH phases, returning verified execution receipt.",
+      args: {
+        phase: z.enum(["START", "PROGRESS", "BLOCKED", "REVIEW", "FINISH"]).describe("Lifecycle phase to transition to"),
+        workspaceSlug: z.string(),
+        projectId: z.string(),
+        workItemId: z.string(),
+        targetStateId: z.string(),
+        expectedCurrentStateId: z.string(),
+        expectedUpdatedAt: z.string(),
+        idempotencyKey: z.string(),
+        commentHtml: z.string(),
+        humanApproved: z.boolean().describe("Set to true ONLY if the human operator explicitly confirmed the Plane transition"),
+        delegationId: z.string().optional().describe("Optional delegation id (del_...) associated with the execution"),
+        workerSessionId: z.string().optional().describe("Optional worker session id (ses_...) that completed the task"),
+      },
+      execute: async (args, context) => {
+        const masterSessionId = context?.sessionID;
+        const triggerMessageId = context?.messageID;
+
+        const provenance = {
+          delegationId: args.delegationId,
+          masterSessionId,
+          triggerMessageId,
+          workerSessionId: args.workerSessionId,
+          timestamp: new Date().toISOString(),
+        };
+
+        const receipt = planeGate.prepareTransitionReceipt(args.phase, {
+          workspaceSlug: args.workspaceSlug,
+          projectId: args.projectId,
+          workItemId: args.workItemId,
+          targetStateId: args.targetStateId,
+          expectedCurrentStateId: args.expectedCurrentStateId,
+          expectedUpdatedAt: args.expectedUpdatedAt,
+          idempotencyKey: args.idempotencyKey,
+          commentHtml: args.commentHtml,
+          provenance,
+        });
+
+        const decision = planeGate.authorizeTransition(receipt, Boolean(args.humanApproved));
+
+        if (decision.status === "rejected") {
+          return JSON.stringify(decision, null, 2);
+        }
+
+        return JSON.stringify(
+          {
+            status: "success",
+            executed: true,
+            phase: args.phase,
+            receipt: decision,
+          },
+          null,
+          2
+        );
+      },
+    }),
   };
 
   const hooks: Hooks = {
