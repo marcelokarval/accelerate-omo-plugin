@@ -335,4 +335,38 @@ describe("OpenCodeClient", () => {
       ]);
     });
   });
+
+  it("getSession returns session json when response is ok, null when 404 or error", async () => {
+    let requestedUrl = "";
+    const customFetch = async (url: any) => {
+      requestedUrl = String(url);
+      if (requestedUrl.includes("valid-ses")) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ id: "valid-ses", title: "[MASTER] Main" }),
+        };
+      }
+      if (requestedUrl.includes("error-ses")) {
+        throw new Error("Network explosion");
+      }
+      return {
+        ok: false,
+        status: 404,
+        text: async () => "Not found",
+      };
+    };
+
+    const client = new OpenCodeClient({ baseUrl: "http://test-server:4096", fetch: customFetch as any, apiVersion: "v2" });
+    const res = await client.getSession("valid-ses");
+    expect(res).toEqual({ id: "valid-ses", title: "[MASTER] Main" });
+    expect(requestedUrl).toBe("http://test-server:4096/api/session/valid-ses");
+
+    const notFound = await client.getSession("missing-ses");
+    expect(notFound).toBeNull();
+
+    const err = await client.getSession("error-ses");
+    expect(err).toBeNull();
+  });
+
 });

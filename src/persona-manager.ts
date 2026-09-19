@@ -1,6 +1,7 @@
 import { readFileSync, existsSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+import type { OpenCodeClient } from "./opencode-client.js";
 
 export type SessionPersona = "master" | "worker" | "standard";
 
@@ -24,16 +25,58 @@ export class PersonaManager {
    * Identifies persona from session title or metadata string.
    * Tolerates leading emojis, spaces, and brackets.
    */
+  /**
+   * Identifies persona from session title or metadata string.
+   * Tolerates leading emojis, spaces, and brackets.
+   * Supports case-insensitive matches for: [MASTER], MASTER -, MASTER:, ⚡ [W-, [W-, [WORKER].
+   */
   public detectPersonaFromTitle(title: string): SessionPersona {
-    const upper = title.trim().toUpperCase();
-    if (upper.includes("[MASTER]")) {
+    const trimmed = title.trim();
+    const upper = trimmed.toUpperCase();
+
+    if (
+      upper.includes("[MASTER]") ||
+      upper.includes("MASTER -") ||
+      upper.includes("MASTER:")
+    ) {
       return "master";
     }
-    // Suporta "[W-", "[WORKER]" e prefixos com emoji como "⚡ [W-8]"
-    if (/\[W-\d+\]/i.test(title) || upper.includes("[WORKER]") || /\[W-/i.test(title)) {
+
+    if (
+      /⚡?\s*\[W-/i.test(trimmed) ||
+      /\[W-\d+\]/i.test(trimmed) ||
+      upper.includes("[WORKER]")
+    ) {
       return "worker";
     }
+
     return "standard";
+  }
+
+  /**
+   * Resolves persona asynchronously for a session, consulting OpenCodeClient if needed.
+   */
+  public async resolveSessionPersona(
+    sessionId: string,
+    client?: OpenCodeClient
+  ): Promise<SessionPersona> {
+    const cached = this.sessionPersonas.get(sessionId);
+    if (cached && cached !== "standard") {
+      return cached;
+    }
+
+    if (client && sessionId) {
+      const session = await client.getSession(sessionId);
+      if (session?.title && typeof session.title === "string") {
+        const detected = this.detectPersonaFromTitle(session.title);
+        if (detected !== "standard") {
+          this.registerSessionPersona(sessionId, detected);
+          return detected;
+        }
+      }
+    }
+
+    return this.getSessionPersona(sessionId);
   }
 
   public registerSessionPersona(sessionId: string, persona: SessionPersona): void {

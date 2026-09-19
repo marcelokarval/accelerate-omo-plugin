@@ -39,4 +39,35 @@ describe("PersonaManager & Tool Fencing (Task 5)", () => {
     expect(masterInstr).toContain("ACCELERATE MASTER ORCHESTRATOR LAW");
     expect(workerInstr).toContain("ACCELERATE ATOMIC WORKER LAW");
   });
+
+  it("detects case-insensitive variants in detectPersonaFromTitle", () => {
+    expect(manager.detectPersonaFromTitle("[MASTER]")).toBe("master");
+    expect(manager.detectPersonaFromTitle("MASTER - Orchestrator")).toBe("master");
+    expect(manager.detectPersonaFromTitle("master: Main Task")).toBe("master");
+    expect(manager.detectPersonaFromTitle("⚡ [W-1] stripe")).toBe("worker");
+    expect(manager.detectPersonaFromTitle("[w-99] worker")).toBe("worker");
+    expect(manager.detectPersonaFromTitle("[WORKER] build")).toBe("worker");
+    expect(manager.detectPersonaFromTitle("Standard title")).toBe("standard");
+  });
+
+  it("resolves session persona dynamically using client.getSession", async () => {
+    const mockClient = {
+      getSession: async (id: string) => {
+        if (id === "ses-master") return { title: "MASTER: Root Orchestration" };
+        if (id === "ses-worker") return { title: "⚡ [W-2] Subtask" };
+        if (id === "ses-404") return null;
+        return { title: "Random Session" };
+      },
+    } as any;
+
+    const pm = new PersonaManager();
+    expect(await pm.resolveSessionPersona("ses-master", mockClient)).toBe("master");
+    expect(await pm.resolveSessionPersona("ses-worker", mockClient)).toBe("worker");
+    expect(await pm.resolveSessionPersona("ses-404", mockClient)).toBe("standard");
+    expect(await pm.resolveSessionPersona("ses-random", mockClient)).toBe("standard");
+
+    // Check cached
+    expect(pm.getSessionPersona("ses-master")).toBe("master");
+  });
+
 });

@@ -1,3 +1,4 @@
+import path from "node:path";
 import { tool, type Plugin, type Hooks, type ToolDefinition } from "@opencode-ai/plugin";
 import { z } from "zod";
 import { PersonaManager } from "./persona-manager.js";
@@ -5,14 +6,6 @@ import { GitWorktreeService } from "./git-worktree.js";
 import { OpenCodeClient } from "./opencode-client.js";
 import { StateMachineService } from "./state-machine.js";
 import { PlaneApprovalGateService } from "./plane-adapter.js";
-
-export {
-  PersonaManager,
-  GitWorktreeService,
-  OpenCodeClient,
-  StateMachineService,
-  PlaneApprovalGateService,
-};
 
 export const AccelerateOmoPlugin: Plugin = async (_context) => {
   const personaManager = new PersonaManager();
@@ -39,14 +32,22 @@ export const AccelerateOmoPlugin: Plugin = async (_context) => {
           throw new Error("[ACCELERATE RECURSION DENIED] Workers are forbidden from dispatching child workers.");
         }
 
-        if (stateMachine.getPhase() === "DISCUSSION") {
+        const currentPhase = stateMachine.getPhase();
+        if (currentPhase === "FAILED") {
+          stateMachine.transitionTo("DISCUSSION");
+          stateMachine.transitionTo("SPEC_READY");
+        } else if (currentPhase === "DISCUSSION") {
           stateMachine.transitionTo("SPEC_READY");
         }
+
+        const resolvedSpecPath = path.isAbsolute(args.specPath)
+          ? args.specPath
+          : path.resolve(process.cwd(), args.specPath);
 
         const result = await stateMachine.dispatchWorker({
           taskSlug: args.taskSlug,
           targetDir: args.targetDir,
-          specPath: args.specPath,
+          specPath: resolvedSpecPath,
           baseRef: args.baseRef || "HEAD",
           prompt: args.prompt,
           masterSessionId: sessionId,
@@ -111,6 +112,7 @@ export const AccelerateOmoPlugin: Plugin = async (_context) => {
      */
     "tool.execute.before": async (input, _output) => {
       const { tool: toolName, sessionID } = input;
+      await personaManager.resolveSessionPersona(sessionID, openCodeClient);
       if (!personaManager.isToolAllowed(sessionID, toolName)) {
         throw new Error(
           `[ACCELERATE PERMISSION DENIED] Session is registered as [MASTER]. Direct code modification tool '${toolName}' is blocked by policy. You must dispatch an isolated Worker session.`
@@ -124,12 +126,19 @@ export const AccelerateOmoPlugin: Plugin = async (_context) => {
      */
     "chat.message": async (input, output) => {
       const { sessionID } = input;
+      let persona = await personaManager.resolveSessionPersona(sessionID, openCodeClient);
       const firstPart = output.parts?.[0];
       if (firstPart && firstPart.type === "text" && typeof firstPart.text === "string") {
-        const detected = personaManager.detectPersonaFromTitle(firstPart.text);
-        if (detected !== "standard") {
-          personaManager.registerSessionPersona(sessionID, detected);
-          const instructions = personaManager.getPersonaInstructions(detected);
+        if (persona === "standard") {
+          const detected = personaManager.detectPersonaFromTitle(firstPart.text);
+          if (detected !== "standard") {
+            personaManager.registerSessionPersona(sessionID, detected);
+            persona = detected;
+          }
+        }
+
+        if (persona !== "standard") {
+          const instructions = personaManager.getPersonaInstructions(persona);
           if (instructions && !firstPart.text.includes(instructions)) {
             firstPart.text = `<PERSONA_GOVERNANCE>\n${instructions}\n</PERSONA_GOVERNANCE>\n\n${firstPart.text}`;
           }
