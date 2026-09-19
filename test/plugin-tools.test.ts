@@ -99,4 +99,50 @@ describe("Plugin Registered Tools (acc_dispatch_worker & acc_approve_plane_sync)
     expect(result.provenance.masterSessionId).toBe("ses_master_test");
     expect(result.provenance.triggerMessageId).toBe("msg_dispatch_test");
   });
+
+  it("resolves relative specPath in acc_dispatch_worker", async () => {
+    const fs = await import("node:fs");
+    const tempSpec = "test-spec-relative.md";
+    fs.writeFileSync(tempSpec, "# Test Spec");
+
+    try {
+      const hooks = await AccelerateOmoPlugin({} as any);
+      const dispatchTool = hooks?.tool?.acc_dispatch_worker;
+      expect(dispatchTool).toBeDefined();
+
+      const result = await dispatchTool.execute({
+        taskSlug: "test-slug",
+        targetDir: "/tmp/test-target-dir-" + Date.now(),
+        specPath: tempSpec,
+        prompt: "Do work",
+      }, { sessionID: "master-session-1", messageID: "msg-1" });
+
+      expect(result).toBeDefined();
+      const parsed = JSON.parse(result);
+      expect(parsed.status).toBe("dispatched");
+      expect(parsed.provenance?.delegationId).toBeDefined();
+    } finally {
+      if (fs.existsSync(tempSpec)) fs.unlinkSync(tempSpec);
+    }
+  });
+
+  it("resolves session persona dynamically in tool.execute.before and chat.message hooks", async () => {
+    const hooks = await AccelerateOmoPlugin({} as any);
+    const beforeHook = hooks["tool.execute.before"];
+    const chatHook = hooks["chat.message"];
+
+    expect(beforeHook).toBeDefined();
+    expect(chatHook).toBeDefined();
+
+    // In chat.message, if firstPart.text has [MASTER], it injects governance
+    const output = { parts: [{ type: "text", text: "[MASTER] Plan project" }] };
+    await chatHook({ sessionID: "ses-chat-master" }, output);
+    expect(output.parts[0].text).toContain("<PERSONA_GOVERNANCE>");
+
+    // In tool.execute.before, master is blocked from edit
+    await expect(
+      beforeHook({ sessionID: "ses-chat-master", tool: "edit" }, {})
+    ).rejects.toThrow("[ACCELERATE PERMISSION DENIED]");
+  });
+
 });

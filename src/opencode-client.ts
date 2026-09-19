@@ -66,6 +66,33 @@ export class OpenCodeClient {
    * In V2: POST /api/session with body { location: { directory }, agent, model }
    * In V1: POST /session?directory=... with body { agent, title, ... }
    */
+  /**
+   * Get session metadata.
+   * Sends GET /session/:id (V1) or GET /session/:id (or /api/session/:id for V2).
+   * Gracefully returns null on 404 or network errors rather than throwing unhandled exceptions.
+   */
+  async getSession(sessionId: string): Promise<any> {
+    try {
+      const endpoint = this.apiVersion === "v2"
+        ? `${this.baseUrl}/api/session/${encodeURIComponent(sessionId)}`
+        : `${this.baseUrl}/session/${encodeURIComponent(sessionId)}`;
+
+      const res = await this.fetchImpl(endpoint, {
+        method: "GET",
+        headers: this.getHeaders(false),
+      });
+
+      if (!res.ok) {
+        return null;
+      }
+
+      const json = await res.json() as any;
+      return json?.data ?? json;
+    } catch {
+      return null;
+    }
+  }
+
   async createSession(options: CreateSessionOptions = {}): Promise<any> {
     if (this.apiVersion === "v2") {
       const body: Record<string, any> = {};
