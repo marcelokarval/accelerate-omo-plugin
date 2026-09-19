@@ -59,6 +59,8 @@ export class StateMachineService {
   }
 
   public transitionTo(nextPhase: SessionPhase): void {
+    if (this.currentPhase === nextPhase) return;
+
     const validTransitions: Record<SessionPhase, SessionPhase[]> = {
       DISCUSSION: ["SPEC_READY", "FAILED"],
       SPEC_READY: ["DISPATCHING", "DISCUSSION", "FAILED"],

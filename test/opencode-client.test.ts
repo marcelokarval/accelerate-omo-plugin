@@ -369,4 +369,40 @@ describe("OpenCodeClient", () => {
     expect(err).toBeNull();
   });
 
+  describe("updateSession", () => {
+    it("sends HTTP PATCH to /session/:id (or /api/session/:id for v2) with JSON body and returns session data", async () => {
+      let requestedUrl = "";
+      let requestedMethod = "";
+      let requestedBody = "";
+      const customFetch = async (url: any, init: any) => {
+        requestedUrl = String(url);
+        requestedMethod = init.method;
+        requestedBody = init.body;
+        if (requestedUrl.includes("valid-ses")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({ id: "valid-ses", title: "[MASTER] New Title" }),
+          };
+        }
+        return {
+          ok: false,
+          status: 404,
+          text: async () => "Not found",
+        };
+      };
+
+      const client = new OpenCodeClient({ baseUrl: "http://127.0.0.1:4096", fetch: customFetch as any });
+      const res = await client.updateSession("valid-ses", { title: "[MASTER] New Title" });
+
+      expect(requestedMethod).toBe("PATCH");
+      expect(requestedUrl).toBe("http://127.0.0.1:4096/session/valid-ses");
+      expect(JSON.parse(requestedBody)).toEqual({ title: "[MASTER] New Title" });
+      expect(res).toEqual({ id: "valid-ses", title: "[MASTER] New Title" });
+
+      const notFound = await client.updateSession("missing-ses", { title: "foo" });
+      expect(notFound).toBeNull();
+    });
+  });
+
 });

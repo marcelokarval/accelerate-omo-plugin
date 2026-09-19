@@ -25,6 +25,13 @@ export interface PromptOptions {
   [key: string]: any;
 }
 
+export interface SessionInfo {
+  id: string;
+  title?: string;
+  directory?: string;
+  [key: string]: any;
+}
+
 export interface SSEEvent {
   id?: string;
   event?: string;
@@ -87,6 +94,30 @@ export class OpenCodeClient {
       }
 
       const json = await res.json() as any;
+      return json?.data ?? json;
+    } catch {
+      return null;
+    }
+  }
+
+  async updateSession(
+    sessionId: string,
+    updates: { title?: string; [key: string]: any }
+  ): Promise<any> {
+    try {
+      const endpoint = `${this.baseUrl}/session/${encodeURIComponent(sessionId)}`;
+
+      const res = await this.fetchImpl(endpoint, {
+        method: "PATCH",
+        headers: this.getHeaders(true),
+        body: JSON.stringify(updates),
+      });
+
+      if (!res.ok) {
+        return null;
+      }
+
+      const json = (await res.json()) as any;
       return json?.data ?? json;
     } catch {
       return null;

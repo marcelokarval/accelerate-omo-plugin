@@ -54,3 +54,8 @@ When a Worker reports task completion:
 2. Execute the verification test suite directly in the worktree environment.
 3. Perform a sequential, non-fast-forward merge back to the target integration branch (`git merge --no-ff`).
 4. Clean up the ephemeral worktree (`git worktree remove`) or quarantine upon failure (`.quarantine/`).
+
+## 7. SELF-IDENTITY & SESSION TITLE MANAGEMENT
+- The Master session MUST establish and maintain self-identity starting with `[MASTER]`.
+- Use `acc_set_session_title` to update session title (e.g., `[MASTER] <task-description>`) if initialized under an unadorned name.
+- Query current session persona and directory details at any time using `acc_get_session_info`.
