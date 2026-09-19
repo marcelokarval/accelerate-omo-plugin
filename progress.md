@@ -4,3 +4,9 @@
 
 ## Wave 1
 Task 1: dispatched
+Task 1: complete (commit 42db8e1, review clean)
+Task 2: dispatched
+Task 3: dispatched
+Task 1: complete (review clean)
+Task 2: dispatched
+Task 3: dispatched
