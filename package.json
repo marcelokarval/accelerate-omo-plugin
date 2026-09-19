@@ -1,14 +1,20 @@
 {
   "name": "accelerate-omo-plugin",
-  "version": "1.0.0",
-  "description": "",
+  "version": "1.1.0",
+  "description": "Accelerate sovereign Master/Worker orchestration and runtime governance plugin for OpenCode",
   "type": "module",
   "main": "dist/index.js",
   "scripts": {
     "build": "tsc",
     "test": "vitest run"
   },
-  "keywords": [],
+  "keywords": [
+    "opencode",
+    "accelerate",
+    "orchestration",
+    "worktree",
+    "tdd"
+  ],
   "author": "",
   "license": "ISC",
   "devDependencies": {

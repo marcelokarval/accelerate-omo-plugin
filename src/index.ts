@@ -27,17 +27,18 @@ export const AccelerateOmoPlugin: Plugin = async (_context) => {
       args: {
         taskSlug: z.string().describe("Short slug identifying the task (e.g. 'stripe-adapter', 'p4y-w8')"),
         targetDir: z.string().describe("Absolute or relative path where the isolated Git Worktree will be created"),
+        specPath: z.string().describe("Path to the specification artifact (PRD/ADR/SDD/Plan). The file MUST exist on disk."),
         baseRef: z.string().optional().describe("Git base commit/branch to branch off (default: 'HEAD')"),
         prompt: z.string().describe("Strict, self-contained implementation task prompt for the Worker"),
       },
       execute: async (args, context) => {
         const sessionId = context?.sessionID || "";
+        const messageId = context?.messageID || "";
         const persona = personaManager.getSessionPersona(sessionId);
         if (persona === "worker") {
           throw new Error("[ACCELERATE RECURSION DENIED] Workers are forbidden from dispatching child workers.");
         }
 
-        // Garante transição para SPEC_READY caso esteja em DISCUSSION
         if (stateMachine.getPhase() === "DISCUSSION") {
           stateMachine.transitionTo("SPEC_READY");
         }
@@ -45,8 +46,11 @@ export const AccelerateOmoPlugin: Plugin = async (_context) => {
         const result = await stateMachine.dispatchWorker({
           taskSlug: args.taskSlug,
           targetDir: args.targetDir,
+          specPath: args.specPath,
           baseRef: args.baseRef || "HEAD",
           prompt: args.prompt,
+          masterSessionId: sessionId,
+          triggerMessageId: messageId,
         });
 
         return JSON.stringify(result, null, 2);
@@ -66,8 +70,21 @@ export const AccelerateOmoPlugin: Plugin = async (_context) => {
         idempotencyKey: z.string(),
         commentHtml: z.string(),
         humanApproved: z.boolean().describe("Set to true ONLY if the human operator explicitly confirmed the Plane transition"),
+        delegationId: z.string().optional().describe("Optional delegation id (del_...) associated with the execution"),
+        workerSessionId: z.string().optional().describe("Optional worker session id (ses_...) that completed the task"),
       },
-      execute: async (args) => {
+      execute: async (args, context) => {
+        const masterSessionId = context?.sessionID;
+        const triggerMessageId = context?.messageID;
+
+        const provenance = {
+          delegationId: args.delegationId,
+          masterSessionId,
+          triggerMessageId,
+          workerSessionId: args.workerSessionId,
+          timestamp: new Date().toISOString(),
+        };
+
         const receipt = planeGate.prepareTransitionReceipt(args.phase, {
           workspaceSlug: args.workspaceSlug,
           projectId: args.projectId,
@@ -77,6 +94,7 @@ export const AccelerateOmoPlugin: Plugin = async (_context) => {
           expectedUpdatedAt: args.expectedUpdatedAt,
           idempotencyKey: args.idempotencyKey,
           commentHtml: args.commentHtml,
+          provenance,
         });
 
         const decision = planeGate.authorizeTransition(receipt, Boolean(args.humanApproved));
