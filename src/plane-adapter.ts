@@ -16,28 +16,53 @@ export interface PlaneTransitionReceipt {
   status: "pending_human_approval" | "approved_for_dispatch" | "rejected";
   payload: PlaneTransitionPayload;
   formattedReceiptMarkdown: string;
+  requiresHumanApproval: boolean;
   error?: string;
 }
 
 export class PlaneApprovalGateService {
   /**
-   * Prepares a lifecycle transition payload strictly requiring human approval.
-   * Fail-Closed: Never performs an automated network request without explicit approval flag.
+   * Determina se uma fase exige aprovação humana explícita.
+   * Regra Prática: Apenas START (início da tarefa) e FINISH (conclusão/done pós-review) exigem aprovação humana.
+   * Fases intermediárias (PROGRESS, BLOCKED, REVIEW) fluem automaticamente pelo Master sem parar o fluxo.
+   */
+  public requiresHumanGate(phase: PlaneLifecyclePhase): boolean {
+    return phase === "START" || phase === "FINISH";
+  }
+
+  /**
+   * Prepares a lifecycle transition payload.
+   * Se for START ou FINISH, entra em pending_human_approval.
+   * Se for fase intermediária (PROGRESS, BLOCKED, REVIEW), é auto-aprovada para despacho.
    */
   public prepareTransitionReceipt(
     phase: PlaneLifecyclePhase,
     payload: Omit<PlaneTransitionPayload, "isHumanApproved">
   ): PlaneTransitionReceipt {
+    const needsApproval = this.requiresHumanGate(phase);
+
     const receiptMarkdown = [
-      `### 🛡️ [PLANE MUTATION GATE] Proposed Transition: ${phase}`,
+      `### 🛡️ [PLANE MUTATION GATE] Transition: ${phase}`,
       `- **Work Item ID**: \`${payload.workItemId}\``,
       `- **Project**: \`${payload.projectId}\``,
       `- **Target State**: \`${payload.targetStateId}\``,
+      `- **Requires Human Approval**: \`${needsApproval}\``,
       `- **Idempotency Key**: \`${payload.idempotencyKey}\``,
       `\n**Rendered Lifecycle Comment Preview**:`,
       `> ${payload.commentHtml.replace(/\n/g, "\n> ")}`,
-      `\n*Notice: Automated network mutations are blocked by policy. Human operator must approve transmission.*`,
     ].join("\n");
+
+    if (!needsApproval) {
+      return {
+        status: "approved_for_dispatch",
+        payload: {
+          ...payload,
+          isHumanApproved: true,
+        },
+        formattedReceiptMarkdown: receiptMarkdown,
+        requiresHumanApproval: false,
+      };
+    }
 
     return {
       status: "pending_human_approval",
@@ -46,22 +71,35 @@ export class PlaneApprovalGateService {
         isHumanApproved: false,
       },
       formattedReceiptMarkdown: receiptMarkdown,
+      requiresHumanApproval: true,
     };
   }
 
   /**
-   * Evaluates if a transition can be sent to the Plane MCP.
-   * Returns true ONLY if explicit human authorization is affirmed.
+   * Avalia a transição para despacho ao Plane.
+   * Se a fase não exigir aprovação humana, libera direto.
+   * Se exigir (START ou FINISH), valida o flag humanApproved.
    */
   public authorizeTransition(
     receipt: PlaneTransitionReceipt,
     humanApproved: boolean
   ): PlaneTransitionReceipt {
+    if (!receipt.requiresHumanApproval) {
+      return {
+        ...receipt,
+        status: "approved_for_dispatch",
+        payload: {
+          ...receipt.payload,
+          isHumanApproved: true,
+        },
+      };
+    }
+
     if (!humanApproved) {
       return {
         ...receipt,
         status: "rejected",
-        error: "Human operator rejected the Plane state transition.",
+        error: "Human operator confirmation required for START and FINISH phases.",
       };
     }
 
