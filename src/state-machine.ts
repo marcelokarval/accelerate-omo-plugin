@@ -68,7 +68,7 @@ export class StateMachineService {
    * Dispatches an isolated worker session:
    * 1. Creates dedicated git worktree
    * 2. Spawns asynchronous OpenCode session
-   * 3. Dispatches prompt
+   * 3. Dispatches prompt via prompt/sendPrompt
    * 4. If timeout occurs, automatically moves worktree to quarantine (Fail-Closed)
    */
   public async dispatchWorker(config: WorkerDispatchConfig): Promise<WorkerRunResult> {
@@ -109,7 +109,7 @@ export class StateMachineService {
     }
 
     try {
-      await this.openCodeClient.promptAsync(session.id, config.prompt);
+      await this.openCodeClient.prompt(session.id, config.prompt);
       this.transitionTo("EXECUTING");
 
       return {

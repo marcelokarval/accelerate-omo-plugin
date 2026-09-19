@@ -23,7 +23,7 @@ describe("StateMachineService & Fail-Closed Dispatch (Task 6)", () => {
       id: "ses_test_123",
       directory: "/tmp/worktree-123",
     });
-    vi.spyOn(client, "promptAsync").mockResolvedValue();
+    vi.spyOn(client, "prompt").mockResolvedValue({ success: true });
 
     stateMachine = new StateMachineService(worktreeService, client);
   });
@@ -58,12 +58,12 @@ describe("StateMachineService & Fail-Closed Dispatch (Task 6)", () => {
 
     expect(worktreeService.create).toHaveBeenCalled();
     expect(client.createSession).toHaveBeenCalled();
-    expect(client.promptAsync).toHaveBeenCalledWith("ses_test_123", "Implement adapter");
+    expect(client.prompt).toHaveBeenCalledWith("ses_test_123", "Implement adapter");
   });
 
   it("should fail-closed and quarantine worktree if prompt dispatch fails", async () => {
     stateMachine.transitionTo("SPEC_READY");
-    vi.spyOn(client, "promptAsync").mockRejectedValue(new Error("Network timeout"));
+    vi.spyOn(client, "prompt").mockRejectedValue(new Error("Network timeout"));
 
     const result = await stateMachine.dispatchWorker({
       taskSlug: "broken-task",
