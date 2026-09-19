@@ -36,6 +36,94 @@ describe("OpenCodeClient", () => {
       expect(headers["Authorization"]).toBe(`Basic ${expectedToken}`);
     });
 
+    it("should read baseUrl from process.env.OPENCODE_BASE_URL when baseUrl option is omitted", async () => {
+      const prevEnv = process.env.OPENCODE_BASE_URL;
+      process.env.OPENCODE_BASE_URL = "http://env-host:5000";
+
+      const mockFetch = vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({ id: "ses_env" }),
+      });
+
+      try {
+        const client = new OpenCodeClient({
+          fetch: mockFetch,
+          apiVersion: "v2",
+        });
+
+        await client.createSession({ directory: "/test/dir" });
+        expect(mockFetch).toHaveBeenCalledTimes(1);
+        const [url] = mockFetch.mock.calls[0];
+        expect(url).toBe("http://env-host:5000/api/session");
+      } finally {
+        if (prevEnv !== undefined) {
+          process.env.OPENCODE_BASE_URL = prevEnv;
+        } else {
+          delete process.env.OPENCODE_BASE_URL;
+        }
+      }
+    });
+
+    it("should attach Bearer Authorization header when apiKey option or OPENCODE_API_KEY is provided", async () => {
+      const mockFetch = vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({ id: "ses_key" }),
+      });
+
+      const clientWithOpt = new OpenCodeClient({
+        apiKey: "custom-api-key",
+        fetch: mockFetch,
+      });
+
+      await clientWithOpt.createSession({ directory: "/test/dir" });
+      let [, init] = mockFetch.mock.calls[0];
+      expect(init.headers["Authorization"]).toBe("Bearer custom-api-key");
+
+      mockFetch.mockClear();
+
+      const prevKey = process.env.OPENCODE_API_KEY;
+      process.env.OPENCODE_API_KEY = "env-api-key";
+      try {
+        const clientWithEnv = new OpenCodeClient({
+          fetch: mockFetch,
+        });
+        await clientWithEnv.createSession({ directory: "/test/dir" });
+        [, init] = mockFetch.mock.calls[0];
+        expect(init.headers["Authorization"]).toBe("Bearer env-api-key");
+      } finally {
+        if (prevKey !== undefined) {
+          process.env.OPENCODE_API_KEY = prevKey;
+        } else {
+          delete process.env.OPENCODE_API_KEY;
+        }
+      }
+    });
+
+    it("should attach Basic Authorization header when OPENCODE_SERVER_PASSWORD is set and username/password omitted", async () => {
+      const mockFetch = vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({ id: "ses_pwd" }),
+      });
+
+      const prevPwd = process.env.OPENCODE_SERVER_PASSWORD;
+      process.env.OPENCODE_SERVER_PASSWORD = "server-password";
+      try {
+        const client = new OpenCodeClient({
+          fetch: mockFetch,
+        });
+        await client.createSession({ directory: "/test/dir" });
+        const [, init] = mockFetch.mock.calls[0];
+        const expectedToken = Buffer.from(":server-password").toString("base64");
+        expect(init.headers["Authorization"]).toBe(`Basic ${expectedToken}`);
+      } finally {
+        if (prevPwd !== undefined) {
+          process.env.OPENCODE_SERVER_PASSWORD = prevPwd;
+        } else {
+          delete process.env.OPENCODE_SERVER_PASSWORD;
+        }
+      }
+    });
+
     it("should pass custom headers", async () => {
       const mockFetch = vi.fn().mockResolvedValue({
         ok: true,

@@ -1,6 +1,7 @@
 export interface OpenCodeClientOptions {
   baseUrl?: string;
   headers?: Record<string, string>;
+  apiKey?: string;
   username?: string;
   password?: string;
   apiVersion?: "v1" | "v2";
@@ -45,14 +46,28 @@ export class OpenCodeClient {
   private fetchImpl: typeof fetch;
 
   constructor(options: OpenCodeClientOptions = {}) {
-    this.baseUrl = (options.baseUrl || "http://127.0.0.1:4096").replace(/\/+$/, "");
+    const rawBaseUrl =
+      options.baseUrl ??
+      process.env.OPENCODE_BASE_URL ??
+      "http://127.0.0.1:4096";
+    this.baseUrl = rawBaseUrl.replace(/\/+$/, "");
     this.apiVersion = options.apiVersion || "v2";
     this.fetchImpl = options.fetch || (globalThis.fetch ? globalThis.fetch.bind(globalThis) : (fetch as any));
     this.headers = { ...(options.headers || {}) };
 
-    if (options.username !== undefined || options.password !== undefined) {
+    const apiKey = options.apiKey ?? process.env.OPENCODE_API_KEY;
+    if (apiKey) {
+      this.headers["Authorization"] = `Bearer ${apiKey}`;
+    } else if (
+      options.username !== undefined ||
+      options.password !== undefined ||
+      process.env.OPENCODE_SERVER_PASSWORD !== undefined
+    ) {
       const u = options.username || "";
-      const p = options.password || "";
+      const p =
+        options.password !== undefined
+          ? options.password
+          : process.env.OPENCODE_SERVER_PASSWORD || "";
       const encoded = typeof Buffer !== "undefined"
         ? Buffer.from(`${u}:${p}`).toString("base64")
         : btoa(`${u}:${p}`);
