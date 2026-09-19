@@ -42,7 +42,7 @@ export class PlaneApprovalGateService {
     const needsApproval = this.requiresHumanGate(phase);
 
     const receiptMarkdown = [
-      `### 🛡️ [PLANE MUTATION GATE] Transition: ${phase}`,
+      `### 🛡️ [PLANE MUTATION GATE] Proposed Transition: ${phase}`,
       `- **Work Item ID**: \`${payload.workItemId}\``,
       `- **Project**: \`${payload.projectId}\``,
       `- **Target State**: \`${payload.targetStateId}\``,
@@ -50,6 +50,9 @@ export class PlaneApprovalGateService {
       `- **Idempotency Key**: \`${payload.idempotencyKey}\``,
       `\n**Rendered Lifecycle Comment Preview**:`,
       `> ${payload.commentHtml.replace(/\n/g, "\n> ")}`,
+      needsApproval
+        ? `\n*Notice: Automated network mutations are blocked by policy. Human operator must approve transmission.*`
+        : `\n*Notice: Automated intermediate transition. Dispatched automatically by Master.*`,
     ].join("\n");
 
     if (!needsApproval) {
@@ -99,7 +102,7 @@ export class PlaneApprovalGateService {
       return {
         ...receipt,
         status: "rejected",
-        error: "Human operator confirmation required for START and FINISH phases.",
+        error: "Human operator rejected the Plane state transition.",
       };
     }
 
