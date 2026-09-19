@@ -145,4 +145,75 @@ describe("Plugin Registered Tools (acc_dispatch_worker & acc_approve_plane_sync)
     ).rejects.toThrow("[ACCELERATE PERMISSION DENIED]");
   });
 
+  describe("acc_set_session_title and acc_get_session_info", () => {
+    it("acc_set_session_title updates session title and updates persona", async () => {
+      const hooks = await AccelerateOmoPlugin({} as any);
+      const setTitleTool = hooks.tool?.acc_set_session_title;
+      expect(setTitleTool).toBeDefined();
+
+      const resultStr = await setTitleTool?.execute(
+        { title: "[MASTER] Orchestration Root", sessionId: "ses-title-1" },
+        { sessionID: "ses-caller-1" } as any
+      );
+      const res = JSON.parse(resultStr);
+      expect(res.status).toBe("success");
+      expect(res.sessionId).toBe("ses-title-1");
+      expect(res.title).toBe("[MASTER] Orchestration Root");
+      expect(res.persona).toBe("master");
+
+      const beforeHook = hooks["tool.execute.before"];
+      await expect(
+        beforeHook?.({ sessionID: "ses-title-1", tool: "edit" }, {})
+      ).rejects.toThrow("[ACCELERATE PERMISSION DENIED]");
+
+      const resultStr2 = await setTitleTool?.execute(
+        { title: "⚡ [W-test] Worker Task" },
+        { sessionID: "ses-title-2" } as any
+      );
+      const res2 = JSON.parse(resultStr2);
+      expect(res2.status).toBe("success");
+      expect(res2.sessionId).toBe("ses-title-2");
+      expect(res2.title).toBe("⚡ [W-test] Worker Task");
+      expect(res2.persona).toBe("worker");
+
+      await expect(
+        setTitleTool?.execute({ title: "No session" }, {} as any)
+      ).rejects.toThrow();
+    });
+
+    it("acc_get_session_info returns session details and resolved persona", async () => {
+      const hooks = await AccelerateOmoPlugin({} as any);
+      const getInfoTool = hooks.tool?.acc_get_session_info;
+      const setTitleTool = hooks.tool?.acc_set_session_title;
+      expect(getInfoTool).toBeDefined();
+
+      await setTitleTool?.execute(
+        { title: "[MASTER] Architecture", sessionId: "ses-info-1" },
+        {} as any
+      );
+
+      const infoStr = await getInfoTool?.execute(
+        { sessionId: "ses-info-1" },
+        { sessionID: "ses-caller" } as any
+      );
+      const info = JSON.parse(infoStr);
+      expect(info.status).toBe("success");
+      expect(info.sessionId).toBe("ses-info-1");
+      expect(info.persona).toBe("master");
+
+      const infoStr2 = await getInfoTool?.execute(
+        {},
+        { sessionID: "ses-info-1" } as any
+      );
+      const info2 = JSON.parse(infoStr2);
+      expect(info2.status).toBe("success");
+      expect(info2.sessionId).toBe("ses-info-1");
+      expect(info2.persona).toBe("master");
+
+      await expect(
+        getInfoTool?.execute({}, {} as any)
+      ).rejects.toThrow();
+    });
+  });
+
 });

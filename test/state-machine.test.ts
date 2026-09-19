@@ -45,6 +45,18 @@ describe("StateMachineService & Fail-Closed Dispatch (Task 6)", () => {
     }).toThrow(/INVALID TRANSITION/);
   });
 
+  it("is idempotent when transitioning to current phase", () => {
+    stateMachine.transitionTo("SPEC_READY");
+    expect(stateMachine.getPhase()).toBe("SPEC_READY");
+    stateMachine.transitionTo("SPEC_READY");
+    expect(stateMachine.getPhase()).toBe("SPEC_READY");
+
+    stateMachine.transitionTo("FAILED");
+    expect(stateMachine.getPhase()).toBe("FAILED");
+    stateMachine.transitionTo("FAILED");
+    expect(stateMachine.getPhase()).toBe("FAILED");
+  });
+
   it("should successfully orchestrate a worker dispatch", async () => {
     stateMachine.transitionTo("SPEC_READY");
 
