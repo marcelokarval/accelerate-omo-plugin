@@ -78,11 +78,11 @@ export class StateMachineService {
     let worktreeResult;
 
     try {
-      worktreeResult = await this.worktreeService.create(
-        config.repoPath,
-        branchName,
-        config.baseRef
-      );
+      worktreeResult = await this.worktreeService.create({
+        repoPath: config.repoPath,
+        branch: branchName,
+        baseRef: config.baseRef,
+      });
     } catch (err: any) {
       this.transitionTo("FAILED");
       return {
@@ -91,7 +91,7 @@ export class StateMachineService {
       };
     }
 
-    const { worktreePath } = worktreeResult;
+    const worktreePath = worktreeResult.path;
 
     let session;
     try {

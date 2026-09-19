@@ -19,8 +19,9 @@ describe("Task 8: End-to-End Orchestration Rehearsal (P4Y-74 Task 8 Simulation)"
 
     // Mocks do runtime para execução determinística
     vi.spyOn(worktreeService, "create").mockResolvedValue({
-      worktreePath: "/tmp/rehearsal-worktree-p4y-w8",
-      branchName: "accelerate/p4y-74-w1-task-8",
+      path: "/tmp/rehearsal-worktree-p4y-w8",
+      branch: "accelerate/p4y-74-w1-task-8",
+      baseRef: "HEAD",
     });
     vi.spyOn(worktreeService, "remove").mockResolvedValue();
     vi.spyOn(client, "createSession").mockResolvedValue({
