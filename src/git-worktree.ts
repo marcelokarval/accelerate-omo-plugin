@@ -144,8 +144,16 @@ export class GitWorktreeService {
     const destDirName = `${baseName}-${timestamp}${sanitizedReason}`;
     const destinationPath = path.join(this.quarantineDir, destDirName);
 
-    // Rename/move the directory
-    await fs.rename(worktreePath, destinationPath);
+    try {
+      await fs.rename(worktreePath, destinationPath);
+    } catch (err: any) {
+      if (err?.code === "EXDEV") {
+        await fs.cp(worktreePath, destinationPath, { recursive: true });
+        await fs.rm(worktreePath, { recursive: true, force: true });
+      } else {
+        throw err;
+      }
+    }
 
     // Prune git worktree tracking references so git doesn't complain about missing worktrees
     try {
@@ -200,4 +208,36 @@ export class GitWorktreeService {
 
     return worktrees;
   }
+
+  async mergeBranch(sourceBranch: string, targetBranch: string = "master"): Promise<{ commitHash: string }> {
+    await this.git(["checkout", targetBranch]);
+    await this.git(["merge", "--no-ff", sourceBranch]);
+    const { stdout } = await this.git(["rev-parse", "HEAD"]);
+    return { commitHash: stdout.trim() };
+  }
+
+  async runVerification(targetDir: string, command: string = "npm test"): Promise<{ exitCode: number; output: string }> {
+    const cwd = path.isAbsolute(targetDir)
+      ? targetDir
+      : path.resolve(this.repoPath, targetDir);
+
+    try {
+      const { stdout, stderr } = await this.execRunner("sh", ["-c", command], { cwd });
+      return {
+        exitCode: 0,
+        output: `${stdout}${stderr ? "\n" + stderr : ""}`,
+      };
+    } catch (err: any) {
+      const exitCode = typeof err.code === "number" ? err.code : 1;
+      const stdout = err.stdout ? String(err.stdout) : "";
+      const stderr = err.stderr ? String(err.stderr) : (err.message || "");
+      const output = `${stdout}${stdout && stderr ? "\n" : ""}${stderr}`;
+      return {
+        exitCode,
+        output,
+      };
+    }
+  }
 }
+
+

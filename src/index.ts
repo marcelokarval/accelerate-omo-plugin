@@ -1,4 +1,5 @@
 import path from "node:path";
+import fs from "node:fs/promises";
 import { tool, type Plugin, type Hooks, type ToolDefinition } from "@opencode-ai/plugin";
 import { z } from "zod";
 import { PersonaManager } from "./persona-manager.js";
@@ -6,13 +7,22 @@ import { GitWorktreeService } from "./git-worktree.js";
 import { OpenCodeClient } from "./opencode-client.js";
 import { StateMachineService } from "./state-machine.js";
 import { PlaneApprovalGateService } from "./plane-adapter.js";
+import { WorkerCompletionReportSchema } from "./types/worker-report.js";
 
-export const AccelerateOmoPlugin: Plugin = async (_context) => {
-  const personaManager = new PersonaManager();
-  const worktreeService = new GitWorktreeService();
-  const openCodeClient = new OpenCodeClient();
-  const stateMachine = new StateMachineService(worktreeService, openCodeClient);
-  const planeGate = new PlaneApprovalGateService();
+export interface AcceleratePluginOptions {
+  personaManager?: PersonaManager;
+  worktreeService?: GitWorktreeService;
+  openCodeClient?: OpenCodeClient;
+  stateMachine?: StateMachineService;
+  planeGate?: PlaneApprovalGateService;
+}
+
+export const AccelerateOmoPlugin: Plugin = async (context, options?: AcceleratePluginOptions) => {
+  const personaManager = options?.personaManager ?? new PersonaManager();
+  const worktreeService = options?.worktreeService ?? new GitWorktreeService();
+  const openCodeClient = options?.openCodeClient ?? new OpenCodeClient();
+  const stateMachine = options?.stateMachine ?? new StateMachineService(worktreeService, openCodeClient);
+  const planeGate = options?.planeGate ?? new PlaneApprovalGateService();
 
   const tools: Record<string, ToolDefinition> = {
     acc_dispatch_worker: tool({
@@ -156,6 +166,81 @@ export const AccelerateOmoPlugin: Plugin = async (_context) => {
             title,
             persona,
             directory,
+          },
+          null,
+          2
+        );
+      },
+    }),
+
+    acc_fanin_worker: tool({
+      description: "Automates Worker fan-in: runs verification suite, audits diff, merges branch with --no-ff, and removes worktree.",
+      args: {
+        targetDir: z.string().describe("Path to target worktree"),
+        testCommand: z.string().optional().default("npm test").describe("Verification command to execute in worktree"),
+        targetBranch: z.string().optional().default("master").describe("Target branch to merge into"),
+        report: WorkerCompletionReportSchema.optional().describe("Optional structured Worker completion report"),
+      },
+      execute: async (args, context) => {
+        const resolvedTargetDir = path.isAbsolute(args.targetDir)
+          ? args.targetDir
+          : path.resolve(process.cwd(), args.targetDir);
+
+        try {
+          await fs.access(resolvedTargetDir);
+        } catch {
+          throw new Error(`[ACCELERATE FANIN ERROR] Worktree directory does not exist: ${resolvedTargetDir}`);
+        }
+
+        if (args.report) {
+          WorkerCompletionReportSchema.parse(args.report);
+        }
+
+        const verification = await worktreeService.runVerification(resolvedTargetDir, args.testCommand);
+        if (verification.exitCode !== 0) {
+          await worktreeService.quarantine({
+            path: resolvedTargetDir,
+            reason: "verification_failed",
+          });
+          return JSON.stringify(
+            {
+              status: "error",
+              error: "verification_failed",
+              quarantined: true,
+              exitCode: verification.exitCode,
+              output: verification.output,
+            },
+            null,
+            2
+          );
+        }
+
+        const worktrees = await worktreeService.list();
+        const matched = worktrees.find((wt) => path.resolve(wt.path) === resolvedTargetDir);
+        let branchToMerge = matched?.branch;
+        if (branchToMerge && branchToMerge.startsWith("refs/heads/")) {
+          branchToMerge = branchToMerge.replace("refs/heads/", "");
+        }
+
+        if (!branchToMerge) {
+          branchToMerge = path.basename(resolvedTargetDir);
+        }
+
+        const { commitHash } = await worktreeService.mergeBranch(branchToMerge, args.targetBranch);
+
+        try {
+          await worktreeService.remove({ path: resolvedTargetDir, force: true });
+        } catch {
+        }
+
+        return JSON.stringify(
+          {
+            status: "success",
+            targetDir: args.targetDir,
+            mergedBranch: branchToMerge,
+            targetBranch: args.targetBranch,
+            commitHash,
+            testOutput: verification.output,
           },
           null,
           2

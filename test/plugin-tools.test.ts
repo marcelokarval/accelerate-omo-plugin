@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { AccelerateOmoPlugin } from "../src/index.js";
 
 describe("Plugin Registered Tools (acc_dispatch_worker & acc_approve_plane_sync)", () => {
@@ -8,6 +8,7 @@ describe("Plugin Registered Tools (acc_dispatch_worker & acc_approve_plane_sync)
     expect(hooks.tool).toBeDefined();
     expect(hooks.tool?.acc_dispatch_worker).toBeDefined();
     expect(hooks.tool?.acc_approve_plane_sync).toBeDefined();
+    expect(hooks.tool?.acc_fanin_worker).toBeDefined();
   });
 
   it("should require human approval ONLY for START and FINISH phases", async () => {
@@ -212,6 +213,137 @@ describe("Plugin Registered Tools (acc_dispatch_worker & acc_approve_plane_sync)
 
       await expect(
         getInfoTool?.execute({}, {} as any)
+      ).rejects.toThrow();
+    });
+  });
+
+  describe("acc_fanin_worker", () => {
+    it("should successfully run verification, merge branch, remove worktree, and return success receipt", async () => {
+      const mockWorktreeService = {
+        runVerification: vi.fn().mockResolvedValue({
+          exitCode: 0,
+          output: "all tests passed\n",
+        }),
+        list: vi.fn().mockResolvedValue([
+          {
+            path: "/tmp/test-fanin-worktree",
+            branch: "refs/heads/accelerate/acc-task-test",
+          },
+        ]),
+        mergeBranch: vi.fn().mockResolvedValue({ commitHash: "c0ffee123" }),
+        remove: vi.fn().mockResolvedValue({ path: "/tmp/test-fanin-worktree" }),
+        quarantine: vi.fn(),
+      };
+
+      const hooks = await AccelerateOmoPlugin({} as any, {
+        worktreeService: mockWorktreeService as any,
+      });
+      const faninTool = hooks.tool?.acc_fanin_worker;
+      expect(faninTool).toBeDefined();
+
+      const fs = await import("node:fs");
+      const targetDir = "/tmp/test-fanin-worktree";
+      fs.mkdirSync(targetDir, { recursive: true });
+
+      try {
+        const resultStr = await faninTool?.execute({
+          targetDir,
+          testCommand: "npm test",
+          targetBranch: "master",
+          report: {
+            delegationId: "del_fanin123",
+            taskSlug: "fanin-task",
+            status: "success",
+            touchedFiles: ["src/feature.ts"],
+            testResults: {
+              command: "npm test",
+              passed: 5,
+              failed: 0,
+              exitCode: 0,
+            },
+            buildStatus: "clean",
+            diffSummary: "1 file changed, 10 insertions(+)",
+            invariantsSatisfied: ["TDD Iron Law"],
+          },
+        }, { sessionID: "ses_master_audit", messageID: "msg_fanin" } as any);
+
+        const result = JSON.parse(resultStr);
+        expect(result.status).toBe("success");
+        expect(result.targetDir).toBe(targetDir);
+        expect(result.mergedBranch).toBe("accelerate/acc-task-test");
+        expect(result.targetBranch).toBe("master");
+        expect(result.commitHash).toBe("c0ffee123");
+        expect(result.testOutput).toContain("all tests passed");
+
+        expect(mockWorktreeService.runVerification).toHaveBeenCalledWith(targetDir, "npm test");
+        expect(mockWorktreeService.mergeBranch).toHaveBeenCalledWith("accelerate/acc-task-test", "master");
+        expect(mockWorktreeService.remove).toHaveBeenCalledWith({ path: targetDir, force: true });
+      } finally {
+        if (fs.existsSync(targetDir)) {
+          fs.rmdirSync(targetDir);
+        }
+      }
+    });
+
+    it("should quarantine worktree and return error without merging when verification fails", async () => {
+      const mockWorktreeService = {
+        runVerification: vi.fn().mockResolvedValue({
+          exitCode: 1,
+          output: "Tests failed with exit code 1",
+        }),
+        quarantine: vi.fn().mockResolvedValue({
+          originalPath: "/tmp/test-fanin-fail",
+          quarantinedPath: "/tmp/quarantine/test-fanin-fail",
+        }),
+        list: vi.fn(),
+        mergeBranch: vi.fn(),
+        remove: vi.fn(),
+      };
+
+      const hooks = await AccelerateOmoPlugin({} as any, {
+        worktreeService: mockWorktreeService as any,
+      });
+      const faninTool = hooks.tool?.acc_fanin_worker;
+
+      const fs = await import("node:fs");
+      const targetDir = "/tmp/test-fanin-fail";
+      fs.mkdirSync(targetDir, { recursive: true });
+
+      try {
+        const resultStr = await faninTool?.execute({
+          targetDir,
+          testCommand: "npm test",
+          targetBranch: "master",
+        }, { sessionID: "ses_master_fail", messageID: "msg_fanin_fail" } as any);
+
+        const result = JSON.parse(resultStr);
+        expect(result.status).toBe("error");
+        expect(result.quarantined).toBe(true);
+        expect(result.error).toContain("verification_failed");
+        expect(mockWorktreeService.quarantine).toHaveBeenCalledWith({
+          path: targetDir,
+          reason: "verification_failed",
+        });
+        expect(mockWorktreeService.mergeBranch).not.toHaveBeenCalled();
+      } finally {
+        if (fs.existsSync(targetDir)) {
+          fs.rmdirSync(targetDir);
+        }
+      }
+    });
+
+
+    it("should reject invalid worker completion report schema", async () => {
+      const hooks = await AccelerateOmoPlugin({} as any);
+      const faninTool = hooks.tool?.acc_fanin_worker;
+
+      await expect(
+        faninTool?.execute({
+          targetDir: "/tmp/non-existent",
+          report: {
+            invalid: "data",
+          } as any,
+        }, {} as any)
       ).rejects.toThrow();
     });
   });

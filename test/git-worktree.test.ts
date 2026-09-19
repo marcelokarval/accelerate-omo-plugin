@@ -213,6 +213,100 @@ describe("GitWorktreeService", () => {
     });
   });
 
+  describe("mergeBranch", () => {
+    it("should execute git merge --no-ff <sourceBranch> into targetBranch and return commitHash", async () => {
+      const execRunner = vi.fn().mockImplementation(async (_cmd: string, args: string[]) => {
+        if (args[0] === "checkout") {
+          return { stdout: "Switched to branch 'master'\n", stderr: "" };
+        }
+        if (args[0] === "merge") {
+          return { stdout: "Merge made by the 'ort' strategy.\n", stderr: "" };
+        }
+        if (args[0] === "rev-parse") {
+          return { stdout: "a1b2c3d4e5f6\n", stderr: "" };
+        }
+        return { stdout: "", stderr: "" };
+      });
+
+      const service = new GitWorktreeService({ repoPath, execRunner });
+      const result = await service.mergeBranch("accelerate/acc-task-1", "master");
+
+      expect(result).toEqual({ commitHash: "a1b2c3d4e5f6" });
+      expect(execRunner).toHaveBeenCalledWith(
+        "git",
+        ["checkout", "master"],
+        { cwd: repoPath, timeout: undefined }
+      );
+      expect(execRunner).toHaveBeenCalledWith(
+        "git",
+        ["merge", "--no-ff", "accelerate/acc-task-1"],
+        { cwd: repoPath, timeout: undefined }
+      );
+      expect(execRunner).toHaveBeenCalledWith(
+        "git",
+        ["rev-parse", "HEAD"],
+        { cwd: repoPath, timeout: undefined }
+      );
+    });
+
+    it("should default targetBranch to master", async () => {
+      const execRunner = vi.fn().mockImplementation(async (_cmd: string, args: string[]) => {
+        if (args[0] === "rev-parse") return { stdout: "deadbeef\n", stderr: "" };
+        return { stdout: "", stderr: "" };
+      });
+
+      const service = new GitWorktreeService({ repoPath, execRunner });
+      const result = await service.mergeBranch("accelerate/acc-task-2");
+
+      expect(result).toEqual({ commitHash: "deadbeef" });
+      expect(execRunner).toHaveBeenCalledWith(
+        "git",
+        ["checkout", "master"],
+        { cwd: repoPath, timeout: undefined }
+      );
+    });
+  });
+
+  describe("runVerification", () => {
+    it("should run command in targetDir and return exitCode and combined output", async () => {
+      const execRunner = vi.fn().mockResolvedValue({
+        stdout: "PASS test/example.test.ts\n",
+        stderr: "",
+      });
+
+      const service = new GitWorktreeService({ repoPath, execRunner });
+      const targetDir = "/mock/repo/.worktrees/worker-1";
+      const result = await service.runVerification(targetDir, "npm test");
+
+      expect(result).toEqual({
+        exitCode: 0,
+        output: "PASS test/example.test.ts\n",
+      });
+      expect(execRunner).toHaveBeenCalledWith(
+        "sh",
+        ["-c", "npm test"],
+        { cwd: targetDir, timeout: undefined }
+      );
+    });
+
+    it("should capture nonzero exitCode and stderr when verification command fails", async () => {
+      const error: any = new Error("Command failed: npm test");
+      error.code = 1;
+      error.stdout = "FAIL test/example.test.ts\n";
+      error.stderr = "AssertionError: expected true to be false\n";
+
+      const execRunner = vi.fn().mockRejectedValue(error);
+
+      const service = new GitWorktreeService({ repoPath, execRunner });
+      const targetDir = "/mock/repo/.worktrees/worker-fail";
+      const result = await service.runVerification(targetDir, "npm test");
+
+      expect(result.exitCode).toBe(1);
+      expect(result.output).toContain("FAIL test/example.test.ts");
+      expect(result.output).toContain("AssertionError");
+    });
+  });
+
   describe("default execRunner with mocked child_process.execFile", () => {
     it("should call child_process.execFile when no custom execRunner is provided", async () => {
       const execFileMock = vi.mocked(childProcess.execFile);
