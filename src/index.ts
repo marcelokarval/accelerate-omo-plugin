@@ -1,4 +1,5 @@
-import type { Plugin, Hooks, ToolDefinition } from "@opencode-ai/plugin";
+import { tool, type Plugin, type Hooks, type ToolDefinition } from "@opencode-ai/plugin";
+import { z } from "zod";
 import { PersonaManager } from "./persona-manager.js";
 import { GitWorktreeService } from "./git-worktree.js";
 import { OpenCodeClient } from "./opencode-client.js";
@@ -21,31 +22,15 @@ export const AccelerateOmoPlugin: Plugin = async (_context) => {
   const planeGate = new PlaneApprovalGateService();
 
   const tools: Record<string, ToolDefinition> = {
-    acc_dispatch_worker: {
+    acc_dispatch_worker: tool({
       description: "Dispatches an atomic task to an isolated Worker in a dedicated Git Worktree via native OpenCode async APIs. Use ONLY when operating as Master Orchestrator.",
-      parameters: {
-        type: "object",
-        properties: {
-          taskSlug: {
-            type: "string",
-            description: "Short slug identifying the task (e.g. 'stripe-adapter', 'p4y-w8')",
-          },
-          targetDir: {
-            type: "string",
-            description: "Absolute or relative path where the isolated Git Worktree will be created",
-          },
-          baseRef: {
-            type: "string",
-            description: "Git base commit/branch to branch off (default: 'HEAD')",
-          },
-          prompt: {
-            type: "string",
-            description: "Strict, self-contained implementation task prompt for the Worker",
-          },
-        },
-        required: ["taskSlug", "targetDir", "prompt"],
+      args: {
+        taskSlug: z.string().describe("Short slug identifying the task (e.g. 'stripe-adapter', 'p4y-w8')"),
+        targetDir: z.string().describe("Absolute or relative path where the isolated Git Worktree will be created"),
+        baseRef: z.string().optional().describe("Git base commit/branch to branch off (default: 'HEAD')"),
+        prompt: z.string().describe("Strict, self-contained implementation task prompt for the Worker"),
       },
-      execute: async (args: any, context: any) => {
+      execute: async (args, context) => {
         const sessionId = context?.sessionID || "";
         const persona = personaManager.getSessionPersona(sessionId);
         if (persona === "worker") {
@@ -66,45 +51,23 @@ export const AccelerateOmoPlugin: Plugin = async (_context) => {
 
         return JSON.stringify(result, null, 2);
       },
-    },
+    }),
 
-    acc_approve_plane_sync: {
+    acc_approve_plane_sync: tool({
       description: "Generates or approves a Plane state transition receipt. Requires human approval before network transmission.",
-      parameters: {
-        type: "object",
-        properties: {
-          phase: {
-            type: "string",
-            enum: ["START", "PROGRESS", "BLOCKED", "REVIEW", "FINISH"],
-            description: "Lifecycle phase to transition to",
-          },
-          workspaceSlug: { type: "string" },
-          projectId: { type: "string" },
-          workItemId: { type: "string" },
-          targetStateId: { type: "string" },
-          expectedCurrentStateId: { type: "string" },
-          expectedUpdatedAt: { type: "string" },
-          idempotencyKey: { type: "string" },
-          commentHtml: { type: "string" },
-          humanApproved: {
-            type: "boolean",
-            description: "Set to true ONLY if the human operator explicitly confirmed the Plane transition",
-          },
-        },
-        required: [
-          "phase",
-          "workspaceSlug",
-          "projectId",
-          "workItemId",
-          "targetStateId",
-          "expectedCurrentStateId",
-          "expectedUpdatedAt",
-          "idempotencyKey",
-          "commentHtml",
-          "humanApproved",
-        ],
+      args: {
+        phase: z.enum(["START", "PROGRESS", "BLOCKED", "REVIEW", "FINISH"]).describe("Lifecycle phase to transition to"),
+        workspaceSlug: z.string(),
+        projectId: z.string(),
+        workItemId: z.string(),
+        targetStateId: z.string(),
+        expectedCurrentStateId: z.string(),
+        expectedUpdatedAt: z.string(),
+        idempotencyKey: z.string(),
+        commentHtml: z.string(),
+        humanApproved: z.boolean().describe("Set to true ONLY if the human operator explicitly confirmed the Plane transition"),
       },
-      execute: async (args: any) => {
+      execute: async (args) => {
         const receipt = planeGate.prepareTransitionReceipt(args.phase, {
           workspaceSlug: args.workspaceSlug,
           projectId: args.projectId,
@@ -119,7 +82,7 @@ export const AccelerateOmoPlugin: Plugin = async (_context) => {
         const decision = planeGate.authorizeTransition(receipt, Boolean(args.humanApproved));
         return JSON.stringify(decision, null, 2);
       },
-    },
+    }),
   };
 
   const hooks: Hooks = {
@@ -129,10 +92,10 @@ export const AccelerateOmoPlugin: Plugin = async (_context) => {
      * Tool Fencing: Blocks code mutation tools for sessions running under the [MASTER] persona.
      */
     "tool.execute.before": async (input, _output) => {
-      const { tool, sessionID } = input;
-      if (!personaManager.isToolAllowed(sessionID, tool)) {
+      const { tool: toolName, sessionID } = input;
+      if (!personaManager.isToolAllowed(sessionID, toolName)) {
         throw new Error(
-          `[ACCELERATE PERMISSION DENIED] Session is registered as [MASTER]. Direct code modification tool '${tool}' is blocked by policy. You must dispatch an isolated Worker session.`
+          `[ACCELERATE PERMISSION DENIED] Session is registered as [MASTER]. Direct code modification tool '${toolName}' is blocked by policy. You must dispatch an isolated Worker session.`
         );
       }
     },
