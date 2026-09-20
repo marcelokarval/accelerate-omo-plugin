@@ -113,7 +113,7 @@ describe("OpenCodeClient", () => {
         });
         await client.createSession({ directory: "/test/dir" });
         const [, init] = mockFetch.mock.calls[0];
-        const expectedToken = Buffer.from(":server-password").toString("base64");
+        const expectedToken = Buffer.from("opencode:server-password").toString("base64");
         expect(init.headers["Authorization"]).toBe(`Basic ${expectedToken}`);
       } finally {
         if (prevPwd !== undefined) {
