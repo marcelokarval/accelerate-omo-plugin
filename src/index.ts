@@ -528,7 +528,7 @@ export const AccelerateOmoPlugin: Plugin = async (context, options?: AccelerateP
               const session = await openCodeClient.getSession(sessionID);
               if (personaManager.isGenericTitle(session?.title)) {
                 const autoTitle = personaManager.generateMasterTitle(firstPart.text, session?.directory);
-                openCodeClient.updateSession(sessionID, { title: autoTitle }).catch(() => {});
+                await openCodeClient.updateSession(sessionID, { title: autoTitle });
               }
             }
           }
