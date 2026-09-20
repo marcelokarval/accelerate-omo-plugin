@@ -3,6 +3,9 @@ import { StateMachineService } from "../src/state-machine.js";
 import { GitWorktreeService } from "../src/git-worktree.js";
 import { OpenCodeClient } from "../src/opencode-client.js";
 
+import path from "node:path";
+import fs from "node:fs";
+
 describe("StateMachineService & Fail-Closed Dispatch (Task 6)", () => {
   let worktreeService: GitWorktreeService;
   let client: OpenCodeClient;
@@ -123,4 +126,43 @@ describe("StateMachineService & Fail-Closed Dispatch (Task 6)", () => {
       reason: "dispatch_failure",
     });
   });
+  describe("Physical Disk-Anchored FSM (Accelerate v3.0)", () => {
+    it("evaluates physical evidence and phases correctly from disk artifacts", () => {
+      const tempDir = path.join(process.cwd(), ".tmp-test-fsm-" + Date.now());
+      fs.mkdirSync(tempDir, { recursive: true });
+
+      try {
+        expect(stateMachine.getPhysicalPipelinePhase(tempDir)).toBe("PRD_REQUIRED");
+
+        // Create PRD
+        fs.mkdirSync(path.join(tempDir, "docs/plans"), { recursive: true });
+        fs.writeFileSync(path.join(tempDir, "docs/plans/prd-test.md"), "# PRD");
+        expect(stateMachine.getPhysicalPipelinePhase(tempDir)).toBe("ADR_REQUIRED");
+
+        // Create ADR
+        fs.mkdirSync(path.join(tempDir, "docs/architecture/adr"), { recursive: true });
+        fs.writeFileSync(path.join(tempDir, "docs/architecture/adr/adr-001.md"), "# ADR");
+        expect(stateMachine.getPhysicalPipelinePhase(tempDir)).toBe("SDD_REQUIRED");
+
+        // Create SDD
+        fs.mkdirSync(path.join(tempDir, "docs/architecture/sdd"), { recursive: true });
+        fs.writeFileSync(path.join(tempDir, "docs/architecture/sdd/sdd-001.md"), "# SDD");
+        expect(stateMachine.getPhysicalPipelinePhase(tempDir)).toBe("TASKS_REQUIRED");
+
+        // Create Tasks
+        fs.mkdirSync(path.join(tempDir, "docs/tasks"), { recursive: true });
+        fs.writeFileSync(path.join(tempDir, "docs/tasks/tasks.md"), "# Tasks");
+        expect(stateMachine.getPhysicalPipelinePhase(tempDir)).toBe("READY_FOR_DISPATCH");
+
+        // Active worktrees exist
+        fs.mkdirSync(path.join(tempDir, ".worktrees/task-1"), { recursive: true });
+        expect(stateMachine.getPhysicalPipelinePhase(tempDir)).toBe("EXECUTING_WAVE");
+      } finally {
+        if (fs.existsSync(tempDir)) {
+          fs.rmSync(tempDir, { recursive: true, force: true });
+        }
+      }
+    });
+  });
+
 });
