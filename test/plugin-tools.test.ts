@@ -682,5 +682,51 @@ describe("Plugin Registered Tools (acc_dispatch_worker & acc_approve_plane_sync)
         ).rejects.toThrow("[ACCELERATE PERMISSION DENIED]");
       });
     });
+    describe("acc_status runtime introspection and pre-condition gating (v3.0)", () => {
+      it("acc_status returns running version, physical phase, evidence, and host info", async () => {
+        const hooks = await AccelerateOmoPlugin({
+          serverUrl: new URL("http://127.0.0.1:35113"),
+        } as any);
+
+        const statusTool = hooks.tool?.acc_status;
+        expect(statusTool).toBeDefined();
+
+        const resStr = await statusTool?.execute({}, { sessionID: "ses-test" } as any);
+        const res = JSON.parse(resStr);
+
+        expect(res.status).toBe("success");
+        expect(res.version).toBe("3.0.0");
+        expect(res.phase).toBeDefined();
+        expect(res.evidence).toBeDefined();
+        expect(res.evidence.hasPrd).toBe(true);
+        expect(res.host.serverUrl).toBe("http://127.0.0.1:35113");
+        expect(res.host.pid).toBeDefined();
+      });
+
+      it("acc_dispatch_worker rejects execution if physical pipeline is in PRD_REQUIRED", async () => {
+        const mockStateMachine = {
+          getPhysicalPipelinePhase: vi.fn().mockReturnValue("PRD_REQUIRED"),
+          getPhase: vi.fn().mockReturnValue("SPEC_READY"),
+          dispatchWorker: vi.fn(),
+        };
+
+        const hooks = await AccelerateOmoPlugin({} as any, {
+          stateMachine: mockStateMachine as any,
+        });
+
+        const dispatchTool = hooks.tool?.acc_dispatch_worker;
+        expect(dispatchTool).toBeDefined();
+
+        await expect(
+          dispatchTool?.execute({
+            taskSlug: "test",
+            targetDir: "/tmp/test",
+            specPath: "test.md",
+            prompt: "do work",
+          }, { sessionID: "ses_master" } as any)
+        ).rejects.toThrow(/Cannot dispatch workers in phase/);
+      });
+    });
+
   });
 });
