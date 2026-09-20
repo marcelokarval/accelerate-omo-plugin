@@ -209,6 +209,12 @@ describe("PersonaManager & Tool Fencing (Task 5)", () => {
       expect(manager.detectPersonaFromText("Assuma a governança do ecossistema")).toBe("master");
       expect(manager.detectPersonaFromText("Inicie a sessão master")).toBe("master");
       expect(manager.detectPersonaFromText("Você é o guardião supremo do projeto")).toBe("master");
+      // Typo-tolerant and colloquial triggers
+      expect(manager.detectPersonaFromText("vc agpra é o master, já renomeie essa sessão e aguarde")).toBe("master");
+      expect(manager.detectPersonaFromText("vc eh o master")).toBe("master");
+      expect(manager.detectPersonaFromText("tu eh o master deste projeto")).toBe("master");
+      expect(manager.detectPersonaFromText("vc agora e o master")).toBe("master");
+
 
       // Explicit legacy tags
       expect(manager.detectPersonaFromText("[MASTER] Build feature")).toBe("master");
@@ -231,4 +237,19 @@ describe("PersonaManager & Tool Fencing (Task 5)", () => {
       expect(title2).toContain("raiz desse repositório");
       expect(title2.length).toBeLessThanOrEqual(70);
     });
+
+    it("generateMasterTitle synthesizes domain/goal titles when prompt is purely meta-commands", () => {
+      const titleCmd = manager.generateMasterTitle(
+        "vc agpra é o master, já renomeie essa sessão e aguarde",
+        "/home/marcelo-karval/Backup/Projetos/prop4you/prop4you-inertia"
+      );
+      expect(titleCmd).toBe("[MASTER] Prop4you inertia - Governança & Orquestração");
+
+      const titleCmd2 = manager.generateMasterTitle(
+        "você é o master renomeie e aguarde",
+        "/home/marcelo-karval/Backup/Projetos/accelerate-omo-plugin"
+      );
+      expect(titleCmd2).toBe("[MASTER] Accelerate omo plugin - Governança & Orquestração");
+    });
+
   });

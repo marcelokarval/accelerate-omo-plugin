@@ -54,8 +54,9 @@ export class PersonaManager {
     const masterSemanticRegex = new RegExp(
       [
         "\\b(you are the master|act as master|master orchestrator|master session|lead orchestrator)\\b",
+        "\\b(v[ocêe|c]|tu)\\s+(ag[op]ra\\s+)?(e|é|eh)\\s+(o|a)?\\s*master\\b",
         "\\b(voc[êe] [ée] o master|voce e o master|atue como master|orquestrador master|sess[ãa]o master|guardi[ãa]o supremo)\\b",
-        "\\b(governan[çc]a do ecossistema)\\b"
+        "\\b(governan[çc]a do ecossistema|assuma a governan[çc]a)\\b"
       ].join("|"),
       "i"
     );
@@ -67,20 +68,42 @@ export class PersonaManager {
     return "standard";
   }
 
-  public generateMasterTitle(promptText: string): string {
-    if (!promptText) return "[MASTER] Orchestration Root";
-    const cleaned = promptText
+  public generateMasterTitle(promptText: string, directory?: string): string {
+    if (!promptText) {
+      return this.fallbackDomainTitle(directory);
+    }
+
+    let cleaned = promptText
       .replace(/\[MASTER\]/gi, "")
-      .replace(/\b(voc[êe] [ée] o master|voce e o master|atue como master|master orchestrator|por favor|analise|please)\b/gi, "")
+      .replace(/\b(v[ocêe|c]|tu)\s+(ag[op]ra\s+)?(e|é|eh)\s+(o|a)?\s*master\b/gi, "")
+      .replace(/\b(voc[êe] [ée] o master|voce e o master|atue como master|master orchestrator|por favor|please)\b/gi, "")
+      .replace(/\b(j[áa]\s+)?renomeie(\s+essa|\s+esta)?\s+sess[ãa]o(\s+e\s+aguarde)?\b/gi, "")
+      .replace(/\b(aguarde|espere|standby)\b/gi, "")
       .replace(/[\r\n\t]+/g, " ")
       .replace(/[^\w\s\u00C0-\u00FF-]/g, "")
       .trim();
 
-    const words = cleaned.split(/\s+/).filter(Boolean);
-    const summary = words.slice(0, 7).join(" ");
-    const capitalized = summary ? summary.charAt(0).toUpperCase() + summary.slice(1) : "Orchestration Root";
+    const words = cleaned.split(/\s+/).filter((w) => w.length > 2);
+    if (words.length < 2) {
+      return this.fallbackDomainTitle(directory);
+    }
 
+    const summary = words.slice(0, 6).join(" ");
+    const capitalized = summary.charAt(0).toUpperCase() + summary.slice(1);
     return `[MASTER] ${capitalized}`.slice(0, 70).trim();
+  }
+
+  private fallbackDomainTitle(directory?: string): string {
+    if (directory) {
+      const parts = directory.replace(/\\/g, "/").split("/").filter(Boolean);
+      const baseName = parts[parts.length - 1];
+      if (baseName && baseName !== "." && baseName !== "undefined") {
+        const cleanBase = baseName.replace(/[-_]/g, " ").replace(/[^\w\s]/g, "");
+        const cap = cleanBase.charAt(0).toUpperCase() + cleanBase.slice(1);
+        return `[MASTER] ${cap} - Governança & Orquestração`.slice(0, 70);
+      }
+    }
+    return "[MASTER] Orquestração & Governança";
   }
 
   public detectPersonaFromTitle(title: string): SessionPersona {

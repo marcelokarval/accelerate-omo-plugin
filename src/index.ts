@@ -18,9 +18,13 @@ export interface AcceleratePluginOptions {
 }
 
 export const AccelerateOmoPlugin: Plugin = async (context, options?: AcceleratePluginOptions) => {
+  const dynamicBaseUrl = context?.serverUrl
+    ? context.serverUrl.toString().replace(/\/+$/, "")
+    : (process.env.OPENCODE_BASE_URL ?? "http://127.0.0.1:4096");
+
   const personaManager = options?.personaManager ?? new PersonaManager();
   const worktreeService = options?.worktreeService ?? new GitWorktreeService();
-  const openCodeClient = options?.openCodeClient ?? new OpenCodeClient();
+  const openCodeClient = options?.openCodeClient ?? new OpenCodeClient({ baseUrl: dynamicBaseUrl });
   const stateMachine = options?.stateMachine ?? new StateMachineService(worktreeService, openCodeClient);
   const planeGate = options?.planeGate ?? new PlaneApprovalGateService();
 
@@ -523,7 +527,7 @@ export const AccelerateOmoPlugin: Plugin = async (context, options?: AccelerateP
             if (detected === "master") {
               const session = await openCodeClient.getSession(sessionID);
               if (personaManager.isGenericTitle(session?.title)) {
-                const autoTitle = personaManager.generateMasterTitle(firstPart.text);
+                const autoTitle = personaManager.generateMasterTitle(firstPart.text, session?.directory);
                 openCodeClient.updateSession(sessionID, { title: autoTitle }).catch(() => {});
               }
             }
