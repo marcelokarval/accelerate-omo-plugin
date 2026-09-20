@@ -455,10 +455,18 @@ export const AccelerateOmoPlugin: Plugin = async (context, options?: AccelerateP
       const firstPart = output.parts?.[0];
       if (firstPart && firstPart.type === "text" && typeof firstPart.text === "string") {
         if (persona === "standard") {
-          const detected = personaManager.detectPersonaFromTitle(firstPart.text);
+          const detected = personaManager.detectPersonaFromText(firstPart.text);
           if (detected !== "standard") {
             personaManager.registerSessionPersona(sessionID, detected);
             persona = detected;
+
+            if (detected === "master") {
+              const session = await openCodeClient.getSession(sessionID);
+              if (personaManager.isGenericTitle(session?.title)) {
+                const autoTitle = personaManager.generateMasterTitle(firstPart.text);
+                openCodeClient.updateSession(sessionID, { title: autoTitle }).catch(() => {});
+              }
+            }
           }
         }
 
