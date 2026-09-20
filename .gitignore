@@ -1,2 +1,6 @@
 node_modules
 dist
+.worktrees/
+.worktrees-quarantine/
+.accelerate/
+.omo/
