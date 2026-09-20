@@ -589,5 +589,49 @@ describe("Plugin Registered Tools (acc_dispatch_worker & acc_approve_plane_sync)
         expect(progResult.phase).toBe("PROGRESS");
       });
     });
+    describe("chat.message semantic auto-branding", () => {
+      it("auto-rebrands generic session to [MASTER] when semantic trigger is present in initial prompt", async () => {
+        let updatedTitle = "";
+        const mockOpenCodeClient = {
+          getSession: vi.fn().mockResolvedValue({
+            id: "ses_generic_test",
+            title: "New session - 2026-09-20T17:43:01.463Z",
+          }),
+          updateSession: vi.fn().mockImplementation(async (id, body) => {
+            updatedTitle = body.title;
+            return { id, title: body.title };
+          }),
+        };
+
+        const hooks = await AccelerateOmoPlugin({} as any, {
+          openCodeClient: mockOpenCodeClient as any,
+        });
+
+        const chatHook = hooks["chat.message"];
+        expect(chatHook).toBeDefined();
+
+        const messageOutput = {
+          parts: [{
+            type: "text",
+            text: "Você é o master desta sessão de continuidade. Leia o relatório e planeje a limpeza da raiz."
+          }]
+        };
+
+        await chatHook?.({ sessionID: "ses_generic_test" }, messageOutput as any);
+
+        expect(messageOutput.parts[0].text).toContain("<PERSONA_GOVERNANCE>");
+        expect(messageOutput.parts[0].text).toContain("ACCELERATE MASTER ORCHESTRATOR LAW");
+
+        expect(mockOpenCodeClient.updateSession).toHaveBeenCalled();
+        expect(updatedTitle).toMatch(/^\[MASTER\] /);
+        expect(updatedTitle).not.toContain("Você é o master");
+
+        // Verify tool fencing is now active for this session
+        const beforeHook = hooks["tool.execute.before"];
+        await expect(
+          beforeHook?.({ sessionID: "ses_generic_test", tool: "edit", args: { filePath: "src/index.ts" } }, {})
+        ).rejects.toThrow("[ACCELERATE PERMISSION DENIED]");
+      });
+    });
   });
 });
