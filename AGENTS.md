@@ -32,3 +32,13 @@ This document establishes the non-negotiable operational invariants for any AI a
 - All changes must be backed by automated tests in Vitest.
 - Run `npm test` and `npm run build` before committing.
 - Strive for 100% clean builds with zero TypeScript compiler errors (`tsc`).
+
+## 5. Host Service Freshness & Deployment Law
+- **Dual Daemon Synchronization**: OpenCode executes through two concurrent user services in this environment:
+  1. `opencode-web.service` (Systemd web daemon on port `4096`).
+  2. `openchamber.service` (OpenChamber dashboard on port `3030`, running an embedded `opencode serve` child process).
+- **Mandatory Reload on Build**: Whenever `accelerate-omo-plugin` is updated, built (`npm run build`), or released, the engineer or agent MUST execute:
+  ```bash
+  systemctl --user restart openchamber.service opencode-web.service
+  ```
+  Failing to restart both services leaves stale plugin snapshots in memory, causing silent tool omission and desynchronization across clients.

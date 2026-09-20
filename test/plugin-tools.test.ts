@@ -147,6 +147,34 @@ describe("Plugin Registered Tools (acc_dispatch_worker & acc_approve_plane_sync)
   });
 
   describe("acc_set_session_title and acc_get_session_info", () => {
+    it("session_rename and session_info operate as universal tools with auto-context resolution", async () => {
+      const hooks = await AccelerateOmoPlugin({} as any);
+      const renameTool = hooks.tool?.session_rename;
+      const infoTool = hooks.tool?.session_info;
+
+      expect(renameTool).toBeDefined();
+      expect(infoTool).toBeDefined();
+
+      const renameResStr = await renameTool?.execute(
+        { title: "[MASTER] Universal Title" },
+        { sessionID: "ses-univ-1" } as any
+      );
+      const renameRes = JSON.parse(renameResStr);
+      expect(renameRes.status).toBe("success");
+      expect(renameRes.sessionId).toBe("ses-univ-1");
+      expect(renameRes.title).toBe("[MASTER] Universal Title");
+      expect(renameRes.persona).toBe("master");
+
+      const infoResStr = await infoTool?.execute(
+        {},
+        { sessionID: "ses-univ-1" } as any
+      );
+      const infoRes = JSON.parse(infoResStr);
+      expect(infoRes.status).toBe("success");
+      expect(infoRes.sessionId).toBe("ses-univ-1");
+      expect(infoRes.persona).toBe("master");
+    });
+
     it("acc_set_session_title updates session title and updates persona", async () => {
       const hooks = await AccelerateOmoPlugin({} as any);
       const setTitleTool = hooks.tool?.acc_set_session_title;
