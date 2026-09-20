@@ -179,3 +179,56 @@ describe("PersonaManager & Tool Fencing (Task 5)", () => {
   });
 
 });
+
+  describe("Semantic Detection & Auto-Branding", () => {
+    const manager = new PersonaManager();
+    it("isGenericTitle detects default/unadorned titles", () => {
+      expect(manager.isGenericTitle("New session - 2026-09-20T17:43:01.463Z")).toBe(true);
+      expect(manager.isGenericTitle("New session")).toBe(true);
+      expect(manager.isGenericTitle("Untitled")).toBe(true);
+      expect(manager.isGenericTitle("Nova sessão - 123")).toBe(true);
+      expect(manager.isGenericTitle("Nova sessao")).toBe(true);
+      expect(manager.isGenericTitle("")).toBe(true);
+      expect(manager.isGenericTitle(undefined)).toBe(true);
+
+      expect(manager.isGenericTitle("[MASTER] Custom Task")).toBe(false);
+      expect(manager.isGenericTitle("Refactoring Core")).toBe(false);
+    });
+
+    it("detectPersonaFromText identifies English and Portuguese semantic triggers", () => {
+      // English triggers
+      expect(manager.detectPersonaFromText("You are the master of this repository")).toBe("master");
+      expect(manager.detectPersonaFromText("Act as master orchestrator to plan the pipeline")).toBe("master");
+      expect(manager.detectPersonaFromText("Please start the master session")).toBe("master");
+      expect(manager.detectPersonaFromText("You are the lead orchestrator")).toBe("master");
+
+      // Portuguese triggers
+      expect(manager.detectPersonaFromText("Você é o master desta sessão de continuidade")).toBe("master");
+      expect(manager.detectPersonaFromText("voce e o master do ecossistema")).toBe("master");
+      expect(manager.detectPersonaFromText("Atue como master orchestrator para limpar a raiz")).toBe("master");
+      expect(manager.detectPersonaFromText("Assuma a governança do ecossistema")).toBe("master");
+      expect(manager.detectPersonaFromText("Inicie a sessão master")).toBe("master");
+      expect(manager.detectPersonaFromText("Você é o guardião supremo do projeto")).toBe("master");
+
+      // Explicit legacy tags
+      expect(manager.detectPersonaFromText("[MASTER] Build feature")).toBe("master");
+      expect(manager.detectPersonaFromText("⚡ [W-task] Worker")).toBe("worker");
+      expect(manager.detectPersonaFromText("[WORKER] Implementation")).toBe("worker");
+
+      // Standard non-matching
+      expect(manager.detectPersonaFromText("analise a raiz desse repositório e mostre o tree")).toBe("standard");
+      expect(manager.detectPersonaFromText("como funciona o stripe?")).toBe("standard");
+    });
+
+    it("generateMasterTitle extracts a clean, bounded title", () => {
+      const title1 = manager.generateMasterTitle("Você é o master desta sessão de continuidade. Leia o arquivo MASTER-REPORT.md");
+      expect(title1.startsWith("[MASTER] ")).toBe(true);
+      expect(title1).not.toContain("Você é o master");
+      expect(title1.length).toBeLessThanOrEqual(70);
+
+      const title2 = manager.generateMasterTitle("analise a raiz desse repositório e monte o plano de limpeza e descarte");
+      expect(title2.startsWith("[MASTER] ")).toBe(true);
+      expect(title2).toContain("raiz desse repositório");
+      expect(title2.length).toBeLessThanOrEqual(70);
+    });
+  });

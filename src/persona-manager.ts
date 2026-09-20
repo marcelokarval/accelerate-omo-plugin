@@ -21,26 +21,19 @@ export class PersonaManager {
     this.skillsDir = options?.skillsDir ?? join(currentDir, "../skills");
   }
 
-  /**
-   * Identifies persona from session title or metadata string.
-   * Tolerates leading emojis, spaces, and brackets.
-   */
-  /**
-   * Identifies persona from session title or metadata string.
-   * Tolerates leading emojis, spaces, and brackets.
-   * Supports case-insensitive matches for: [MASTER], MASTER -, MASTER:, ⚡ [W-, [W-, [WORKER].
-   */
-  public detectPersonaFromTitle(title: string): SessionPersona {
+  public isGenericTitle(title?: string): boolean {
+    if (!title) return true;
     const trimmed = title.trim();
-    const upper = trimmed.toUpperCase();
+    if (trimmed === "" || trimmed.toLowerCase() === "untitled") return true;
+    if (/^new session/i.test(trimmed)) return true;
+    if (/^nova sess[ãa]o/i.test(trimmed)) return true;
+    return false;
+  }
 
-    if (
-      upper.includes("[MASTER]") ||
-      upper.includes("MASTER -") ||
-      upper.includes("MASTER:")
-    ) {
-      return "master";
-    }
+  public detectPersonaFromText(text: string): SessionPersona {
+    if (!text) return "standard";
+    const trimmed = text.trim();
+    const upper = trimmed.toUpperCase();
 
     if (
       /⚡?\s*\[W-/i.test(trimmed) ||
@@ -50,7 +43,48 @@ export class PersonaManager {
       return "worker";
     }
 
+    if (
+      upper.includes("[MASTER]") ||
+      upper.includes("MASTER -") ||
+      upper.includes("MASTER:")
+    ) {
+      return "master";
+    }
+
+    const masterSemanticRegex = new RegExp(
+      [
+        "\\b(you are the master|act as master|master orchestrator|master session|lead orchestrator)\\b",
+        "\\b(voc[êe] [ée] o master|voce e o master|atue como master|orquestrador master|sess[ãa]o master|guardi[ãa]o supremo)\\b",
+        "\\b(governan[çc]a do ecossistema)\\b"
+      ].join("|"),
+      "i"
+    );
+
+    if (masterSemanticRegex.test(trimmed)) {
+      return "master";
+    }
+
     return "standard";
+  }
+
+  public generateMasterTitle(promptText: string): string {
+    if (!promptText) return "[MASTER] Orchestration Root";
+    const cleaned = promptText
+      .replace(/\[MASTER\]/gi, "")
+      .replace(/\b(voc[êe] [ée] o master|voce e o master|atue como master|master orchestrator|por favor|analise|please)\b/gi, "")
+      .replace(/[\r\n\t]+/g, " ")
+      .replace(/[^\w\s\u00C0-\u00FF-]/g, "")
+      .trim();
+
+    const words = cleaned.split(/\s+/).filter(Boolean);
+    const summary = words.slice(0, 7).join(" ");
+    const capitalized = summary ? summary.charAt(0).toUpperCase() + summary.slice(1) : "Orchestration Root";
+
+    return `[MASTER] ${capitalized}`.slice(0, 70).trim();
+  }
+
+  public detectPersonaFromTitle(title: string): SessionPersona {
+    return this.detectPersonaFromText(title);
   }
 
   /**
