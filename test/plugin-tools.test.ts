@@ -617,6 +617,18 @@ describe("Plugin Registered Tools (acc_dispatch_worker & acc_approve_plane_sync)
         expect(progResult.phase).toBe("PROGRESS");
       });
     });
+    describe("context.serverUrl dynamic binding", () => {
+      it("binds openCodeClient to context.serverUrl when provided", async () => {
+        const customUrl = new URL("http://127.0.0.1:45607");
+        const hooks = await AccelerateOmoPlugin({
+          serverUrl: customUrl,
+        } as any);
+
+        expect(hooks).toBeDefined();
+        expect(hooks.tool?.session_rename).toBeDefined();
+      });
+    });
+
     describe("chat.message semantic auto-branding", () => {
       it("auto-rebrands generic session to [MASTER] when semantic trigger is present in initial prompt", async () => {
         let updatedTitle = "";
