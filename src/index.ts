@@ -113,8 +113,68 @@ export const AccelerateOmoPlugin: Plugin = async (context, options?: AccelerateP
       },
     }),
 
+    session_rename: tool({
+      description: "Renames the current OpenCode session title in the database and web UI. Defaults to active session if sessionId is omitted.",
+      args: {
+        title: z.string().min(1).describe("The new title for the session"),
+        sessionId: z.string().optional().describe("Optional target session ID; defaults to current session ID"),
+      },
+      execute: async (args, context) => {
+        const targetSessionId = args.sessionId || context?.sessionID;
+        if (!targetSessionId) {
+          throw new Error("[ACCELERATE ERROR] Missing sessionId for session_rename.");
+        }
+
+        await openCodeClient.updateSession(targetSessionId, { title: args.title });
+        const newPersona = personaManager.detectPersonaFromTitle(args.title);
+        personaManager.registerSessionPersona(targetSessionId, newPersona);
+
+        return JSON.stringify(
+          {
+            status: "success",
+            sessionId: targetSessionId,
+            title: args.title,
+            persona: newPersona,
+          },
+          null,
+          2
+        );
+      },
+    }),
+
+    session_info: tool({
+      description: "Retrieves metadata and identity for the current session, including session ID, title, directory, and active persona.",
+      args: {
+        sessionId: z.string().optional().describe("Optional target session ID; defaults to current session ID"),
+      },
+      execute: async (args, context) => {
+        const targetSessionId = args.sessionId || context?.sessionID;
+        if (!targetSessionId) {
+          throw new Error("[ACCELERATE ERROR] Missing sessionId for session_info.");
+        }
+
+        const session = await openCodeClient.getSession(targetSessionId);
+        const persona = await personaManager.resolveSessionPersona(targetSessionId, openCodeClient);
+
+        const directory = session?.location?.directory || session?.directory || undefined;
+        const title = session?.title || undefined;
+
+        return JSON.stringify(
+          {
+            status: "success",
+            sessionId: targetSessionId,
+            title,
+            persona,
+            directory,
+          },
+          null,
+          2
+        );
+      },
+    }),
+
     acc_set_session_title: tool({
-      description: "Updates an OpenCode session title and registers the corresponding Accelerate persona.",
+      description: "Updates an OpenCode session title and registers the corresponding Accelerate persona (alias of session_rename).",
       args: {
         title: z.string().min(1).describe("The new title for the session"),
         sessionId: z.string().optional().describe("Optional target session ID; defaults to current session ID"),
@@ -143,7 +203,7 @@ export const AccelerateOmoPlugin: Plugin = async (context, options?: AccelerateP
     }),
 
     acc_get_session_info: tool({
-      description: "Retrieves metadata and resolved Accelerate persona for an OpenCode session.",
+      description: "Retrieves metadata and resolved Accelerate persona for an OpenCode session (alias of session_info).",
       args: {
         sessionId: z.string().optional().describe("Optional target session ID; defaults to current session ID"),
       },
