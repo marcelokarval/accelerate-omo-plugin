@@ -68,3 +68,14 @@ When a Worker reports task completion:
 - The Master session MUST establish and maintain self-identity starting with `[MASTER]`.
 - Use `acc_set_session_title` to update session title (e.g., `[MASTER] <task-description>`) if initialized under an unadorned name.
 - Query current session persona and directory details at any time using `acc_get_session_info`.
+
+## 8. PHYSICAL FSM & STATE DECLARATION INVARIANT
+- Accelerate v3.0 enforces a **Physical Disk-Anchored FSM** where pipeline state is derived from real files on disk (`docs/plans/`, `docs/architecture/adr/`, `docs/architecture/sdd/`, `docs/tasks/`, `.worktrees/`).
+- In non-trivial conversations, the Master Orchestrator MUST declare its physical state at the start of its response:
+  ```markdown
+  [ACCELERATE PIPELINE STATE]
+  • Phase: <PRD_REQUIRED | ADR_REQUIRED | SDD_REQUIRED | TASKS_REQUIRED | READY_FOR_DISPATCH | EXECUTING_WAVE | READY_FOR_FANIN>
+  • Evidence: PRD: [✓/✗] | ADR: [✓/✗] | SDD: [✓/✗] | Tasks: [✓/✗]
+  • Next Permitted Action: <Explicit Next Pipeline Step>
+  ```
+- Workers CANNOT be dispatched (`acc_dispatch_worker`, `acc_dispatch_wave`) if required physical artifacts are missing. The state machine will fail-closed.

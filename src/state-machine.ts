@@ -1,4 +1,23 @@
-import { existsSync } from "node:fs";
+export type PhysicalPipelinePhase =
+  | "PRD_REQUIRED"
+  | "ADR_REQUIRED"
+  | "SDD_REQUIRED"
+  | "TASKS_REQUIRED"
+  | "READY_FOR_DISPATCH"
+  | "EXECUTING_WAVE"
+  | "READY_FOR_FANIN"
+  | "COMPLETED";
+
+export interface ProjectPhysicalEvidence {
+  hasPrd: boolean;
+  hasAdr: boolean;
+  hasSdd: boolean;
+  hasTasks: boolean;
+  activeWorktrees: string[];
+  quarantinedWorktrees: string[];
+}
+import { existsSync, readdirSync } from "node:fs";
+import path from "node:path";
 import { randomBytes } from "node:crypto";
 import { GitWorktreeService } from "./git-worktree.js";
 import { OpenCodeClient } from "./opencode-client.js";
@@ -52,6 +71,66 @@ export class StateMachineService {
   ) {
     this.worktreeService = worktreeService ?? new GitWorktreeService();
     this.openCodeClient = openCodeClient ?? new OpenCodeClient();
+  }
+
+  public evaluatePhysicalEvidence(projectDir: string = process.cwd()): ProjectPhysicalEvidence {
+    const checkAnyExists = (dirNames: string[]): boolean => {
+      for (const d of dirNames) {
+        const fullPath = path.resolve(projectDir, d);
+        if (existsSync(fullPath)) {
+          try {
+            const files = readdirSync(fullPath).filter((f) => f.endsWith(".md") && f !== "README.md");
+            if (files.length > 0) return true;
+          } catch {}
+        }
+      }
+      return false;
+    };
+
+    const hasPrd = checkAnyExists(["docs/plans", "planning"]);
+    const hasAdr = checkAnyExists(["docs/architecture/adr", "docs/architecture/decisions"]);
+    const hasSdd = checkAnyExists(["docs/architecture/sdd", "docs/sdd"]);
+    const hasTasks = checkAnyExists(["docs/tasks", "planning/tasks"]);
+
+    const worktreesDir = path.resolve(projectDir, ".worktrees");
+    const activeWorktrees = existsSync(worktreesDir)
+      ? readdirSync(worktreesDir).filter((d) => !d.startsWith("."))
+      : [];
+
+    const quarantineDir = path.resolve(projectDir, ".worktrees-quarantine");
+    const quarantinedWorktrees = existsSync(quarantineDir)
+      ? readdirSync(quarantineDir).filter((d) => !d.startsWith("."))
+      : [];
+
+    return {
+      hasPrd,
+      hasAdr,
+      hasSdd,
+      hasTasks,
+      activeWorktrees,
+      quarantinedWorktrees,
+    };
+  }
+
+  public getPhysicalPipelinePhase(projectDir: string = process.cwd()): PhysicalPipelinePhase {
+    const evidence = this.evaluatePhysicalEvidence(projectDir);
+
+    if (evidence.activeWorktrees.length > 0) {
+      return "EXECUTING_WAVE";
+    }
+    if (!evidence.hasPrd) {
+      return "PRD_REQUIRED";
+    }
+    if (!evidence.hasAdr) {
+      return "ADR_REQUIRED";
+    }
+    if (!evidence.hasSdd) {
+      return "SDD_REQUIRED";
+    }
+    if (!evidence.hasTasks) {
+      return "TASKS_REQUIRED";
+    }
+    return "READY_FOR_DISPATCH";
   }
 
   public getPhase(): SessionPhase {

@@ -12,3 +12,5 @@ export {
 } from "./plane-adapter.js";
 export { WorkerCompletionReportSchema, type WorkerCompletionReport } from "./types/worker-report.js";
 
+
+export type { PhysicalPipelinePhase, ProjectPhysicalEvidence } from "./state-machine.js";

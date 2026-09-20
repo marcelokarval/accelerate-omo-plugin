@@ -29,6 +29,34 @@ export const AccelerateOmoPlugin: Plugin = async (context, options?: AccelerateP
   const planeGate = options?.planeGate ?? new PlaneApprovalGateService();
 
   const tools: Record<string, ToolDefinition> = {
+    acc_status: tool({
+      description: "Returns active Accelerate platform runtime status, plugin version, disk-evaluated engineering phase, host serverUrl, and physical artifact evidence.",
+      args: {
+        directory: z.string().optional().describe("Optional target directory to evaluate (defaults to workspace root)"),
+      },
+      execute: async (args, context) => {
+        const targetDir = args.directory ? path.resolve(process.cwd(), args.directory) : process.cwd();
+        const evidence = stateMachine.evaluatePhysicalEvidence(targetDir);
+        const phase = stateMachine.getPhysicalPipelinePhase(targetDir);
+
+        return JSON.stringify(
+          {
+            status: "success",
+            version: "3.0.0",
+            phase,
+            evidence,
+            host: {
+              serverUrl: dynamicBaseUrl,
+              pid: process.pid,
+              cwd: process.cwd(),
+            },
+          },
+          null,
+          2
+        );
+      },
+    }),
+
     acc_dispatch_worker: tool({
       description: "Dispatches an atomic task to an isolated Worker in a dedicated Git Worktree via native OpenCode async APIs. Use ONLY when operating as Master Orchestrator.",
       args: {
@@ -44,6 +72,13 @@ export const AccelerateOmoPlugin: Plugin = async (context, options?: AccelerateP
         const persona = personaManager.getSessionPersona(sessionId);
         if (persona === "worker") {
           throw new Error("[ACCELERATE RECURSION DENIED] Workers are forbidden from dispatching child workers.");
+        }
+
+        const physicalPhase = typeof stateMachine.getPhysicalPipelinePhase === "function" ? stateMachine.getPhysicalPipelinePhase(process.cwd()) : "READY_FOR_DISPATCH";
+        if (physicalPhase === "PRD_REQUIRED" || physicalPhase === "ADR_REQUIRED" || physicalPhase === "SDD_REQUIRED") {
+          throw new Error(
+            `[ACCELERATE PIPELINE BLOCKED] Cannot dispatch workers in phase '${physicalPhase}'. Master must author specifications first (PRD -> ADR -> SDD).`
+          );
         }
 
         const currentPhase = stateMachine.getPhase();
@@ -332,6 +367,13 @@ export const AccelerateOmoPlugin: Plugin = async (context, options?: AccelerateP
         const persona = personaManager.getSessionPersona(masterSessionId);
         if (persona === "worker") {
           throw new Error("[ACCELERATE RECURSION DENIED] Workers are forbidden from dispatching child workers.");
+        }
+
+        const physicalPhase = typeof stateMachine.getPhysicalPipelinePhase === "function" ? stateMachine.getPhysicalPipelinePhase(process.cwd()) : "READY_FOR_DISPATCH";
+        if (physicalPhase === "PRD_REQUIRED" || physicalPhase === "ADR_REQUIRED" || physicalPhase === "SDD_REQUIRED") {
+          throw new Error(
+            `[ACCELERATE PIPELINE BLOCKED] Cannot dispatch workers in phase '${physicalPhase}'. Master must author specifications first (PRD -> ADR -> SDD).`
+          );
         }
 
         const waveId = `wave_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
