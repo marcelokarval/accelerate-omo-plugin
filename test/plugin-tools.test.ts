@@ -107,7 +107,16 @@ describe("Plugin Registered Tools (acc_dispatch_worker & acc_approve_plane_sync)
     fs.writeFileSync(tempSpec, "# Test Spec");
 
     try {
-      const hooks = await AccelerateOmoPlugin({} as any);
+      const mockClient = {
+        createSession: vi.fn().mockResolvedValue({ id: "ses_mock_dispatch" }),
+        prompt: vi.fn().mockResolvedValue({ ok: true }),
+        sendPrompt: vi.fn().mockResolvedValue({ ok: true }),
+        getSession: vi.fn().mockResolvedValue({ id: "ses_mock_dispatch", title: "Test" }),
+        updateSession: vi.fn().mockResolvedValue({ id: "ses_mock_dispatch" }),
+      };
+      const hooks = await AccelerateOmoPlugin({} as any, {
+        openCodeClient: mockClient as any,
+      });
       const dispatchTool = hooks?.tool?.acc_dispatch_worker;
       expect(dispatchTool).toBeDefined();
 
@@ -120,7 +129,7 @@ describe("Plugin Registered Tools (acc_dispatch_worker & acc_approve_plane_sync)
 
       expect(result).toBeDefined();
       const parsed = JSON.parse(result);
-      expect(parsed.status).toBe("success");
+            expect(parsed.status).toBe("success");
       expect(parsed.provenance?.delegationId).toBeDefined();
     } finally {
       if (fs.existsSync(tempSpec)) fs.unlinkSync(tempSpec);

@@ -63,7 +63,7 @@ export class OpenCodeClient {
       options.password !== undefined ||
       process.env.OPENCODE_SERVER_PASSWORD !== undefined
     ) {
-      const u = options.username || "";
+      const u = options.username || "opencode";
       const p =
         options.password !== undefined
           ? options.password
