@@ -42,3 +42,9 @@ This document establishes the non-negotiable operational invariants for any AI a
   systemctl --user restart openchamber.service opencode-web.service
   ```
   Failing to restart both services leaves stale plugin snapshots in memory, causing silent tool omission and desynchronization across clients.
+
+## 6. Operational Scope & Plugin Boundary Law
+- **Decoupled Architecture (ADR-010)**: This repository (`accelerate-omo-plugin`) is an **operational runtime harness** for OpenCode, OpenChamber, and OmO. It is strictly decoupled from the external `accelerate` methodology repository.
+- **No Hardcoded FSMs**: The plugin core MUST NOT hardcode arbitrary multi-phase sequences (such as `PHASE_0..PHASE_8`) or mandate fixed documentation paths. Methodological compliance is defined by explicit assignment packets, not rigid plugin-level path checks.
+- **Authority vs. Presentation**: Session titles, prefixes (`[MASTER]`), and emojis are human-readable display projections; they are NEVER authority credentials. Authority is governed by explicit session registration and immutable provenance envelopes.
+- **Replacement of v3.1.1 Proposal**: The previous proposal to convert the audit of session `ses_f4f3bff61ffe2X80AbmeIXDijH` into an immediate automated release (v3.1.1) is officially superseded by ADR-010 and the C0 Inventory Reconciliation (`docs/architecture/inventory-c0-reconciliation.md`). No release, merge, or production code mutations are authorized until individual slices are reviewed and scheduled.
