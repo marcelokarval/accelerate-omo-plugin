@@ -62,7 +62,7 @@ export class PlaneApprovalGateService {
       `> ${payload.commentHtml.replace(/\n/g, "\n> ")}`,
       needsApproval
         ? `\n*Notice: Automated network mutations are blocked by policy. Human operator must approve transmission.*`
-        : `\n*Notice: Automated intermediate transition. Dispatched automatically by Master.*`
+        : `\n*Notice: Automated intermediate transition. Prepared and authorized locally for subsequent dispatch; remote transmission is not performed by this runtime.*`
     );
 
     const formattedReceiptMarkdown = receiptLines.join("\n");
@@ -127,8 +127,9 @@ export class PlaneApprovalGateService {
 }
 
 export interface PlaneExecutionReceipt {
-  status: "success" | "rejected" | "error";
+  status: "success" | "rejected" | "error" | "not_executed";
   executed: boolean;
+  reason?: "transport_unavailable" | "human_approval_required" | string;
   phase: PlaneLifecyclePhase;
   requiresHumanApproval?: boolean;
   error?: string;

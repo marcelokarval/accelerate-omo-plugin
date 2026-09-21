@@ -6,7 +6,7 @@ import { PersonaManager } from "./persona-manager.js";
 import { GitWorktreeService } from "./git-worktree.js";
 import { OpenCodeClient } from "./opencode-client.js";
 import { StateMachineService } from "./state-machine.js";
-import { PlaneApprovalGateService } from "./plane-adapter.js";
+import { PlaneApprovalGateService, type PlaneExecutionReceipt } from "./plane-adapter.js";
 import { WorkerCompletionReportSchema } from "./types/worker-report.js";
 
 export interface AcceleratePluginOptions {
@@ -517,29 +517,25 @@ export const AccelerateOmoPlugin: Plugin = async (context, options?: AccelerateP
         const decision = planeGate.authorizeTransition(receipt, Boolean(args.humanApproved));
 
         if (decision.status === "rejected") {
-          return JSON.stringify(
-            {
-              ...decision,
-              executed: false,
-              reason: "human_approval_required",
-              phase: args.phase,
-            },
-            null,
-            2
-          );
+          const rejectedReceipt: PlaneExecutionReceipt = {
+            ...decision,
+            status: "rejected",
+            executed: false,
+            reason: "human_approval_required",
+            phase: args.phase,
+          };
+          return JSON.stringify(rejectedReceipt, null, 2);
         }
 
-        return JSON.stringify(
-          {
-            status: "not_executed",
-            executed: false,
-            reason: "transport_unavailable",
-            phase: args.phase,
-            receipt: decision,
-          },
-          null,
-          2
-        );
+        const notExecutedReceipt: PlaneExecutionReceipt = {
+          status: "not_executed",
+          executed: false,
+          reason: "transport_unavailable",
+          phase: args.phase,
+          receipt: decision,
+        };
+
+        return JSON.stringify(notExecutedReceipt, null, 2);
       },
     }),
   };
