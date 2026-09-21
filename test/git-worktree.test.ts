@@ -64,6 +64,24 @@ describe("GitWorktreeService", () => {
       );
     });
 
+    it("uses an operation-local repository root without changing the service default", async () => {
+      const execRunner = vi.fn().mockResolvedValue({ stdout: "", stderr: "" });
+      const service = new GitWorktreeService({ repoPath, execRunner });
+      const operationRoot = "/mock/project-b";
+
+      await service.create({
+        branch: "feature-project-b",
+        path: ".worktrees/feature-project-b",
+        repositoryRoot: operationRoot,
+      });
+
+      expect(execRunner).toHaveBeenCalledWith(
+        "git",
+        ["worktree", "add", "-b", "feature-project-b", path.resolve(operationRoot, ".worktrees/feature-project-b"), "HEAD"],
+        { cwd: operationRoot, timeout: undefined }
+      );
+    });
+
     it("should throw if git execution fails", async () => {
       const execRunner = vi.fn().mockRejectedValue(new Error("fatal: branch already exists"));
       const service = new GitWorktreeService({ repoPath, execRunner });
@@ -106,6 +124,25 @@ describe("GitWorktreeService", () => {
         ["worktree", "remove", "--force", targetPath],
         { cwd: repoPath, timeout: undefined }
       );
+    });
+
+    it("uses an operation-local repository root for quarantine and prune", async () => {
+      const execRunner = vi.fn().mockResolvedValue({ stdout: "", stderr: "" });
+      const service = new GitWorktreeService({ repoPath, execRunner });
+      const operationRoot = "/mock/project-b";
+      vi.mocked(fs.mkdir).mockResolvedValue(undefined as any);
+      vi.mocked(fs.rename).mockResolvedValue(undefined as any);
+
+      await service.quarantine({
+        path: ".worktrees/failed",
+        repositoryRoot: operationRoot,
+      });
+
+      expect(fs.mkdir).toHaveBeenCalledWith(path.join(operationRoot, ".worktrees-quarantine"), { recursive: true });
+      expect(execRunner).toHaveBeenCalledWith("git", ["worktree", "prune"], {
+        cwd: operationRoot,
+        timeout: undefined,
+      });
     });
   });
 

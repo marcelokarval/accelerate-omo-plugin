@@ -31,16 +31,19 @@ export interface CreateWorktreeOptions {
   branch: string;
   path: string;
   baseRef?: string;
+  repositoryRoot?: string;
 }
 
 export interface RemoveWorktreeOptions {
   path: string;
   force?: boolean;
+  repositoryRoot?: string;
 }
 
 export interface QuarantineWorktreeOptions {
   path: string;
   reason?: string;
+  repositoryRoot?: string;
 }
 
 export interface WorktreeEntry {
@@ -54,6 +57,7 @@ export interface WorktreeEntry {
 export class GitWorktreeService {
   private readonly repoPath: string;
   private readonly quarantineDir: string;
+  private readonly hasCustomQuarantineDir: boolean;
   private readonly execRunner: (command: string, args: string[], options: GitExecOptions) => Promise<{ stdout: string; stderr: string }>;
 
   constructor(options: GitWorktreeServiceOptions = {}) {
@@ -61,6 +65,7 @@ export class GitWorktreeService {
     this.quarantineDir = options.quarantineDir
       ? path.resolve(options.quarantineDir)
       : path.join(this.repoPath, ".worktrees-quarantine");
+    this.hasCustomQuarantineDir = Boolean(options.quarantineDir);
     this.execRunner = options.execRunner || (async (command, args, opts) => {
       return new Promise<{ stdout: string; stderr: string }>((resolve, reject) => {
         childProcess.execFile(
@@ -86,18 +91,23 @@ export class GitWorktreeService {
     });
   }
 
+  private repositoryRoot(operationRoot?: string): string {
+    return operationRoot ? path.resolve(operationRoot) : this.repoPath;
+  }
+
   /**
    * Creates a new worktree with a new branch pointing to baseRef.
    * Runs: git worktree add -b <branch> <path> <baseRef>
    */
   async create(options: CreateWorktreeOptions): Promise<{ path: string; branch: string; baseRef: string }> {
     const { branch, baseRef = "HEAD" } = options;
+    const repositoryRoot = this.repositoryRoot(options.repositoryRoot);
     const worktreePath = path.isAbsolute(options.path)
       ? options.path
-      : path.resolve(this.repoPath, options.path);
+      : path.resolve(repositoryRoot, options.path);
 
     const args = ["worktree", "add", "-b", branch, worktreePath, baseRef];
-    await this.git(args);
+    await this.git(args, { cwd: repositoryRoot });
 
     return {
       path: worktreePath,
@@ -111,9 +121,10 @@ export class GitWorktreeService {
    * Runs: git worktree remove [--force] <path>
    */
   async remove(options: RemoveWorktreeOptions): Promise<{ path: string }> {
+    const repositoryRoot = this.repositoryRoot(options.repositoryRoot);
     const worktreePath = path.isAbsolute(options.path)
       ? options.path
-      : path.resolve(this.repoPath, options.path);
+      : path.resolve(repositoryRoot, options.path);
 
     const args = ["worktree", "remove"];
     if (options.force) {
@@ -121,7 +132,7 @@ export class GitWorktreeService {
     }
     args.push(worktreePath);
 
-    await this.git(args);
+    await this.git(args, { cwd: repositoryRoot });
 
     return { path: worktreePath };
   }
@@ -132,17 +143,21 @@ export class GitWorktreeService {
    * Moves/renames the worktree directory into the quarantine directory and prunes worktrees.
    */
   async quarantine(options: QuarantineWorktreeOptions): Promise<{ originalPath: string; quarantinedPath: string }> {
+    const repositoryRoot = this.repositoryRoot(options.repositoryRoot);
     const worktreePath = path.isAbsolute(options.path)
       ? options.path
-      : path.resolve(this.repoPath, options.path);
+      : path.resolve(repositoryRoot, options.path);
+    const quarantineDir = this.hasCustomQuarantineDir
+      ? this.quarantineDir
+      : path.join(repositoryRoot, ".worktrees-quarantine");
 
-    await fs.mkdir(this.quarantineDir, { recursive: true });
+    await fs.mkdir(quarantineDir, { recursive: true });
 
     const baseName = path.basename(worktreePath);
     const timestamp = Date.now();
     const sanitizedReason = options.reason ? `-${options.reason.replace(/[^a-zA-Z0-9_-]/g, "_")}` : "";
     const destDirName = `${baseName}-${timestamp}${sanitizedReason}`;
-    const destinationPath = path.join(this.quarantineDir, destDirName);
+    const destinationPath = path.join(quarantineDir, destDirName);
 
     try {
       await fs.rename(worktreePath, destinationPath);
@@ -157,7 +172,7 @@ export class GitWorktreeService {
 
     // Prune git worktree tracking references so git doesn't complain about missing worktrees
     try {
-      await this.git(["worktree", "prune"]);
+      await this.git(["worktree", "prune"], { cwd: repositoryRoot });
     } catch {
       // Best-effort prune; ignore failure if git repo is in transient state
     }
@@ -239,5 +254,4 @@ export class GitWorktreeService {
     }
   }
 }
-
 
