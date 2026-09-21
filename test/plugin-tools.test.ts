@@ -293,6 +293,107 @@ describe("Plugin Registered Tools (acc_dispatch_worker & acc_approve_plane_sync)
           expect(mockClient.updateSession).toHaveBeenCalledWith("ses-confirmed-1", { title: "Verified New Title" });
         });
 
+        it("preserves a registered Master when a confirmed title uses a worker marker", async () => {
+          const { PersonaManager } = await import("../src/persona-manager.js");
+          const pm = new PersonaManager();
+          pm.registerSessionPersona("ses-master-worker-title", "master");
+          const mockClient = {
+            updateSession: vi.fn().mockResolvedValue({
+              id: "ses-master-worker-title",
+              title: "[W-TEST] Master remains registered",
+            }),
+          };
+          const hooks = await AccelerateOmoPlugin({} as any, {
+            personaManager: pm,
+            openCodeClient: mockClient as any,
+          });
+
+          const res = JSON.parse(await hooks.tool?.[toolName]?.execute({
+            sessionId: "ses-master-worker-title",
+            title: "[W-TEST] Master remains registered",
+          }, { sessionID: "ses-caller" } as any));
+
+          expect(res.status).toBe("success");
+          expect(res.persona).toBe("master");
+          expect(pm.getSessionPersona("ses-master-worker-title")).toBe("master");
+          expect(mockClient.updateSession).toHaveBeenCalledWith("ses-master-worker-title", {
+            title: "[W-TEST] Master remains registered",
+          });
+        });
+
+        it("uses context.sessionID when the target ID is omitted", async () => {
+          const { PersonaManager } = await import("../src/persona-manager.js");
+          const pm = new PersonaManager();
+          pm.registerSessionPersona("ses-context-target", "worker");
+          const mockClient = {
+            updateSession: vi.fn().mockResolvedValue({
+              id: "ses-context-target",
+              title: "Context fallback title",
+            }),
+          };
+          const hooks = await AccelerateOmoPlugin({} as any, {
+            personaManager: pm,
+            openCodeClient: mockClient as any,
+          });
+
+          const res = JSON.parse(await hooks.tool?.[toolName]?.execute({
+            title: "Context fallback title",
+          }, { sessionID: "ses-context-target" } as any));
+
+          expect(res.status).toBe("success");
+          expect(res.sessionId).toBe("ses-context-target");
+          expect(res.persona).toBe("worker");
+          expect(mockClient.updateSession).toHaveBeenCalledWith("ses-context-target", {
+            title: "Context fallback title",
+          });
+        });
+
+        it("uses an explicit ID over context without changing the caller persona", async () => {
+          const { PersonaManager } = await import("../src/persona-manager.js");
+          const pm = new PersonaManager();
+          pm.registerSessionPersona("ses-caller-master", "master");
+          pm.registerSessionPersona("ses-explicit-worker", "worker");
+          const mockClient = {
+            updateSession: vi.fn().mockResolvedValue({
+              id: "ses-explicit-worker",
+              title: "Explicit target title",
+            }),
+          };
+          const hooks = await AccelerateOmoPlugin({} as any, {
+            personaManager: pm,
+            openCodeClient: mockClient as any,
+          });
+
+          const res = JSON.parse(await hooks.tool?.[toolName]?.execute({
+            sessionId: "ses-explicit-worker",
+            title: "Explicit target title",
+          }, { sessionID: "ses-caller-master" } as any));
+
+          expect(res.status).toBe("success");
+          expect(res.sessionId).toBe("ses-explicit-worker");
+          expect(res.persona).toBe("worker");
+          expect(pm.getSessionPersona("ses-caller-master")).toBe("master");
+          expect(pm.getSessionPersona("ses-explicit-worker")).toBe("worker");
+          expect(mockClient.updateSession).toHaveBeenCalledWith("ses-explicit-worker", {
+            title: "Explicit target title",
+          });
+        });
+
+        it("rejects without transport when both explicit and context IDs are missing", async () => {
+          const mockClient = {
+            updateSession: vi.fn(),
+          };
+          const hooks = await AccelerateOmoPlugin({} as any, {
+            openCodeClient: mockClient as any,
+          });
+
+          await expect(hooks.tool?.[toolName]?.execute({
+            title: "No target title",
+          }, {} as any)).rejects.toThrow("Missing sessionId");
+
+          expect(mockClient.updateSession).not.toHaveBeenCalled();
+        });
+
         // 2. Response null (simulating 404, 500, network failure) -> unconfirmed, never success
         it("2. Response null: returns unconfirmed status with rename_not_confirmed reason and never success", async () => {
           const { PersonaManager } = await import("../src/persona-manager.js");
@@ -468,7 +569,11 @@ describe("Plugin Registered Tools (acc_dispatch_worker & acc_approve_plane_sync)
             status: 404,
             text: async () => "Session not found",
           });
-          const client404 = new OpenCodeClient({ baseUrl: "http://127.0.0.1:9999", fetch: fetchMock404 as any });
+          const client404 = new OpenCodeClient({
+            baseUrl: "http://127.0.0.1:9999",
+            apiKey: "inert-test-api-key",
+            fetch: fetchMock404 as any,
+          });
           const hooks404 = await AccelerateOmoPlugin({} as any, { personaManager: pm, openCodeClient: client404 });
           const res404 = JSON.parse(await hooks404.tool?.[toolName]?.execute({
             sessionId: "ses-real-client",
@@ -476,10 +581,20 @@ describe("Plugin Registered Tools (acc_dispatch_worker & acc_approve_plane_sync)
           }, {} as any));
           expect(res404.status).toBe("unconfirmed");
           expect(res404.reason).toBe("rename_not_confirmed");
+          expect(fetchMock404).toHaveBeenCalledTimes(1);
+          expect(fetchMock404.mock.calls[0][0]).toBe("http://127.0.0.1:9999/session/ses-real-client");
+          expect(fetchMock404.mock.calls[0][1]).toMatchObject({
+            method: "PATCH",
+            body: JSON.stringify({ title: "Title 404" }),
+          });
 
           // Case 7b: Network transport rejection
           const fetchMockReject = vi.fn().mockRejectedValue(new Error("ECONNREFUSED 127.0.0.1:9999"));
-          const clientReject = new OpenCodeClient({ baseUrl: "http://127.0.0.1:9999", fetch: fetchMockReject as any });
+          const clientReject = new OpenCodeClient({
+            baseUrl: "http://127.0.0.1:9999",
+            apiKey: "inert-test-api-key",
+            fetch: fetchMockReject as any,
+          });
           const hooksReject = await AccelerateOmoPlugin({} as any, { personaManager: pm, openCodeClient: clientReject });
           const resReject = JSON.parse(await hooksReject.tool?.[toolName]?.execute({
             sessionId: "ses-real-client",
@@ -487,14 +602,25 @@ describe("Plugin Registered Tools (acc_dispatch_worker & acc_approve_plane_sync)
           }, {} as any));
           expect(resReject.status).toBe("unconfirmed");
           expect(resReject.reason).toBe("rename_not_confirmed");
+          expect(fetchMockReject).toHaveBeenCalledTimes(1);
+          expect(fetchMockReject.mock.calls[0][0]).toBe("http://127.0.0.1:9999/session/ses-real-client");
+          expect(fetchMockReject.mock.calls[0][1]).toMatchObject({
+            method: "PATCH",
+            body: JSON.stringify({ title: "Title Reject" }),
+          });
 
           // Case 7c: Corrupted non-JSON body
+          const badJson = vi.fn().mockRejectedValue(new Error("Unexpected token < in JSON"));
           const fetchMockBadJson = vi.fn().mockResolvedValue({
             ok: true,
             status: 200,
-            json: async () => { throw new Error("Unexpected token < in JSON"); },
+            json: badJson,
           });
-          const clientBadJson = new OpenCodeClient({ baseUrl: "http://127.0.0.1:9999", fetch: fetchMockBadJson as any });
+          const clientBadJson = new OpenCodeClient({
+            baseUrl: "http://127.0.0.1:9999",
+            apiKey: "inert-test-api-key",
+            fetch: fetchMockBadJson as any,
+          });
           const hooksBadJson = await AccelerateOmoPlugin({} as any, { personaManager: pm, openCodeClient: clientBadJson });
           const resBadJson = JSON.parse(await hooksBadJson.tool?.[toolName]?.execute({
             sessionId: "ses-real-client",
@@ -502,6 +628,13 @@ describe("Plugin Registered Tools (acc_dispatch_worker & acc_approve_plane_sync)
           }, {} as any));
           expect(resBadJson.status).toBe("unconfirmed");
           expect(resBadJson.reason).toBe("rename_not_confirmed");
+          expect(fetchMockBadJson).toHaveBeenCalledTimes(1);
+          expect(fetchMockBadJson.mock.calls[0][0]).toBe("http://127.0.0.1:9999/session/ses-real-client");
+          expect(fetchMockBadJson.mock.calls[0][1]).toMatchObject({
+            method: "PATCH",
+            body: JSON.stringify({ title: "Title Bad JSON" }),
+          });
+          expect(badJson).toHaveBeenCalledTimes(1);
 
           expect(pm.getSessionPersona("ses-real-client")).toBe("worker");
         });
@@ -586,6 +719,32 @@ describe("Plugin Registered Tools (acc_dispatch_worker & acc_approve_plane_sync)
           expect(r3.title).toBe("Title Three");
 
           expect(pm.getSessionPersona("ses-repeat-instance")).toBe("master");
+        });
+
+        it("preserves a worker across repeated confirmed Master, worker, and neutral titles", async () => {
+          const { PersonaManager } = await import("../src/persona-manager.js");
+          const pm = new PersonaManager();
+          pm.registerSessionPersona("ses-repeat-worker", "worker");
+          const mockClient = {
+            updateSession: vi.fn().mockImplementation(async (id, body) => ({ id, title: body.title })),
+          };
+          const hooks = await AccelerateOmoPlugin({} as any, {
+            personaManager: pm,
+            openCodeClient: mockClient as any,
+          });
+          const titles = ["[MASTER] Attempted promotion", "[W-TEST] Worker title", "Neutral worker title"];
+
+          for (const title of titles) {
+            const res = JSON.parse(await hooks.tool?.[toolName]?.execute({
+              sessionId: "ses-repeat-worker",
+              title,
+            }, {} as any));
+            expect(res.status).toBe("success");
+            expect(res.persona).toBe("worker");
+            expect(pm.getSessionPersona("ses-repeat-worker")).toBe("worker");
+          }
+
+          expect(mockClient.updateSession).toHaveBeenCalledTimes(3);
         });
       });
     }
