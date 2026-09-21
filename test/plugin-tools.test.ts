@@ -168,6 +168,92 @@ describe("Plugin Registered Tools (acc_dispatch_worker & acc_approve_plane_sync)
     ).rejects.toThrow("[ACCELERATE PERMISSION DENIED]");
   });
 
+  describe("tool.execute.before SDK contract & argument forwarding (P3-A)", () => {
+    it("forwards output.args strictly to policy and enforces boundary decisions", async () => {
+      const { PersonaManager } = await import("../src/persona-manager.js");
+      const pm = new PersonaManager();
+      pm.registerSessionPersona("ses-master-p3a", "master");
+      pm.registerSessionPersona("ses-worker-p3a", "worker");
+
+      let receivedArgs: any = undefined;
+      let receivedTool: string = "";
+      let receivedSession: string = "";
+
+      const origIsToolAllowed = pm.isToolAllowed.bind(pm);
+      pm.isToolAllowed = (sessionId: string, toolName: string, args?: Record<string, any>) => {
+        receivedSession = sessionId;
+        receivedTool = toolName;
+        receivedArgs = args;
+        return origIsToolAllowed(sessionId, toolName, args);
+      };
+
+      const hooks = await AccelerateOmoPlugin({} as any, {
+        personaManager: pm,
+      });
+      const beforeHook = hooks["tool.execute.before"];
+      expect(beforeHook).toBeDefined();
+
+      // 1 & 4. Correct forwarding & argument preservation from output.args
+      const docArgs = { filePath: "docs/plans/2026-09-20-prd.md", content: "# PRD" };
+      const outputDoc = { args: docArgs };
+      const inputDoc = {
+        tool: "write",
+        sessionID: "ses-master-p3a",
+        callID: "call-doc-1",
+      };
+
+      await expect(beforeHook!(inputDoc as any, outputDoc as any)).resolves.not.toThrow();
+
+      expect(receivedSession).toBe("ses-master-p3a");
+      expect(receivedTool).toBe("write");
+      expect(receivedArgs).toBe(docArgs);
+      expect(receivedArgs.filePath).toBe("docs/plans/2026-09-20-prd.md");
+      expect(receivedArgs.content).toBe("# PRD");
+
+      // 2 & 6. Permitted decision: Master writing to allowed documentation path does not block
+      const archArgs = { path: "docs/architecture/adr/adr-001.md" };
+      await expect(
+        beforeHook!({ tool: "edit", sessionID: "ses-master-p3a", callID: "call-arch-1" } as any, { args: archArgs } as any)
+      ).resolves.not.toThrow();
+
+      // 3 & 6. Denied decision: Master writing to production code path is blocked
+      const prodArgs = { filePath: "src/index.ts", content: "// hacked" };
+      await expect(
+        beforeHook!({ tool: "write", sessionID: "ses-master-p3a", callID: "call-prod-1" } as any, { args: prodArgs } as any)
+      ).rejects.toThrow("[ACCELERATE PERMISSION DENIED]");
+
+      // 5. Argument source: accidental args on input must NOT override or substitute output.args
+      const inputWithDistraction = {
+        tool: "write",
+        sessionID: "ses-master-p3a",
+        callID: "call-distract-1",
+        args: { filePath: "src/production.ts" }, // decoy on input
+      };
+      // Real SDK contract passes arguments on output:
+      const outputLegit = {
+        args: { filePath: "docs/tasks/tasks.md" },
+      };
+      await expect(beforeHook!(inputWithDistraction as any, outputLegit as any)).resolves.not.toThrow();
+      expect(receivedArgs.filePath).toBe("docs/tasks/tasks.md");
+
+      // When output.args points to production code, it must be denied even if input has no args
+      await expect(
+        beforeHook!(
+          { tool: "write", sessionID: "ses-master-p3a", callID: "call-prod-2" } as any,
+          { args: { filePath: "src/services.ts" } } as any
+        )
+      ).rejects.toThrow("[ACCELERATE PERMISSION DENIED]");
+
+      // Worker persona is allowed to edit code per policy
+      await expect(
+        beforeHook!(
+          { tool: "write", sessionID: "ses-worker-p3a", callID: "call-worker-1" } as any,
+          { args: { filePath: "src/index.ts" } } as any
+        )
+      ).resolves.not.toThrow();
+    });
+  });
+
   describe("acc_set_session_title and acc_get_session_info", () => {
     it("session_rename and session_info operate as universal tools with auto-context resolution", async () => {
       const hooks = await AccelerateOmoPlugin({} as any);

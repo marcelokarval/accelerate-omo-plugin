@@ -493,9 +493,9 @@ export const AccelerateOmoPlugin: Plugin = async (context, options?: AccelerateP
     /**
      * Tool Fencing: Blocks code mutation tools for sessions running under the [MASTER] persona.
      */
-    "tool.execute.before": async (input, _output) => {
+    "tool.execute.before": async (input, output) => {
       const { tool: toolName, sessionID } = input;
-      const toolArgs = (input as any).args ?? (input as any).parameters;
+      const toolArgs = output?.args;
       await personaManager.resolveSessionPersona(sessionID, openCodeClient);
       if (!personaManager.isToolAllowed(sessionID, toolName, toolArgs)) {
         throw new Error(
