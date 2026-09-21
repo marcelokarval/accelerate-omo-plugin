@@ -595,9 +595,10 @@ describe("Plugin Registered Tools (acc_dispatch_worker & acc_approve_plane_sync)
         expect(finishResult.requiresHumanApproval).toBe(true);
       });
 
-      it("should return approved live execution receipt when START/FINISH is humanApproved or for PROGRESS/BLOCKED/REVIEW", async () => {
+      it("does NOT claim executed: true or remote success when transport is unavailable across all phases", async () => {
         const hooks = await AccelerateOmoPlugin({} as any);
         const planeTool = hooks.tool?.acc_execute_plane_sync;
+        expect(planeTool).toBeDefined();
 
         const baseArgs = {
           workspaceSlug: "karval",
@@ -606,34 +607,44 @@ describe("Plugin Registered Tools (acc_dispatch_worker & acc_approve_plane_sync)
           targetStateId: "state-done",
           expectedCurrentStateId: "state-review",
           expectedUpdatedAt: "2026-09-18T20:00:00Z",
-          idempotencyKey: "test-key-sync-2",
-          commentHtml: "<p>Wave execution complete</p>",
-          humanApproved: true,
-          delegationId: "del_wave_done",
-          workerSessionId: "ses_wave_worker",
+          idempotencyKey: "test-key-sync-truth",
+          commentHtml: "<p>Status update</p>",
+          delegationId: "del_truth_test",
+          workerSessionId: "ses_truth_worker",
         };
 
-        const resStr = await planeTool?.execute(
-          { ...baseArgs, phase: "FINISH" },
-          { sessionID: "ses_master", messageID: "msg_finish" } as any
-        );
-        const result = JSON.parse(resStr);
-        expect(result.status).toBe("success");
-        expect(result.executed).toBe(true);
-        expect(result.phase).toBe("FINISH");
-        expect(result.receipt).toBeDefined();
-        expect(result.receipt.status).toBe("approved_for_dispatch");
-        expect(result.receipt.payload.isHumanApproved).toBe(true);
-        expect(result.receipt.provenance.delegationId).toBe("del_wave_done");
+        const phases = ["START", "PROGRESS", "BLOCKED", "REVIEW", "FINISH"] as const;
 
-        const progResStr = await planeTool?.execute(
-          { ...baseArgs, phase: "PROGRESS", humanApproved: false },
-          {} as any
-        );
-        const progResult = JSON.parse(progResStr);
-        expect(progResult.status).toBe("success");
-        expect(progResult.executed).toBe(true);
-        expect(progResult.phase).toBe("PROGRESS");
+        for (const phase of phases) {
+          // Case A: humanApproved = true
+          const approvedResStr = await planeTool?.execute(
+            { ...baseArgs, phase, humanApproved: true },
+            { sessionID: "ses_master", messageID: "msg_truth" } as any
+          );
+          const approvedRes = JSON.parse(approvedResStr);
+
+          // Invariant: Without remote transport, executed MUST be false and status MUST NOT be remote success
+          expect(approvedRes.executed).toBe(false);
+          expect(approvedRes.status).toBe("not_executed");
+          expect(approvedRes.reason).toBe("transport_unavailable");
+          expect(approvedRes.receipt).toBeDefined();
+          expect(approvedRes.phase).toBe(phase);
+
+          // Case B: humanApproved = false
+          const unapprovedResStr = await planeTool?.execute(
+            { ...baseArgs, phase, humanApproved: false },
+            { sessionID: "ses_master", messageID: "msg_truth_unapp" } as any
+          );
+          const unapprovedRes = JSON.parse(unapprovedResStr);
+
+          expect(unapprovedRes.executed).toBe(false);
+          if (phase === "START" || phase === "FINISH") {
+            expect(unapprovedRes.status).toBe("rejected");
+          } else {
+            expect(unapprovedRes.status).toBe("not_executed");
+            expect(unapprovedRes.reason).toBe("transport_unavailable");
+          }
+        }
       });
     });
     describe("context.serverUrl dynamic binding", () => {

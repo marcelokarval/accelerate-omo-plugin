@@ -475,7 +475,7 @@ export const AccelerateOmoPlugin: Plugin = async (context, options?: AccelerateP
     }),
 
     acc_execute_plane_sync: tool({
-      description: "Executes a Plane state transition receipt. Enforces human approval for START and FINISH phases, returning verified execution receipt.",
+      description: "Validates and authorizes a Plane state transition receipt. Enforces human approval for START and FINISH phases, returning receipt authorization status without remote network mutation.",
       args: {
         phase: z.enum(["START", "PROGRESS", "BLOCKED", "REVIEW", "FINISH"]).describe("Lifecycle phase to transition to"),
         workspaceSlug: z.string(),
@@ -517,13 +517,23 @@ export const AccelerateOmoPlugin: Plugin = async (context, options?: AccelerateP
         const decision = planeGate.authorizeTransition(receipt, Boolean(args.humanApproved));
 
         if (decision.status === "rejected") {
-          return JSON.stringify(decision, null, 2);
+          return JSON.stringify(
+            {
+              ...decision,
+              executed: false,
+              reason: "human_approval_required",
+              phase: args.phase,
+            },
+            null,
+            2
+          );
         }
 
         return JSON.stringify(
           {
-            status: "success",
-            executed: true,
+            status: "not_executed",
+            executed: false,
+            reason: "transport_unavailable",
             phase: args.phase,
             receipt: decision,
           },
