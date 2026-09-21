@@ -1,6 +1,8 @@
 import fsPromises from "node:fs/promises";
 import fsSync from "node:fs";
 import childProcess from "node:child_process";
+import os from "node:os";
+import path from "node:path";
 import { describe, it, expect, vi } from "vitest";
 import { AccelerateOmoPlugin } from "../src/index.js";
 
@@ -991,6 +993,30 @@ describe("Plugin Registered Tools (acc_dispatch_worker & acc_approve_plane_sync)
         expect(mockStateMachine.dispatchWorker).toHaveBeenCalledTimes(2);
       });
 
+      it("uses ToolContext.directory for wave specs and worktree for dispatch authority", async () => {
+        const directory = "/tmp/runtime-project";
+        const worktree = "/tmp/runtime-worktree";
+        const mockStateMachine = {
+          getPhysicalPipelinePhase: vi.fn().mockReturnValue("READY_FOR_DISPATCH"),
+          dispatchWorker: vi.fn().mockResolvedValue({ status: "success" }),
+        };
+        const hooks = await AccelerateOmoPlugin({} as any, { stateMachine: mockStateMachine as any });
+
+        await hooks.tool?.acc_dispatch_wave?.execute(
+          {
+            waveSlug: "runtime-wave",
+            tasks: [{ taskSlug: "runtime-task", targetDir: ".worktrees/task", specPath: "docs/spec.md", prompt: "work" }],
+          },
+          { sessionID: "ses-runtime", directory, worktree } as any
+        );
+
+        expect(mockStateMachine.getPhysicalPipelinePhase).toHaveBeenCalledWith(worktree);
+        expect(mockStateMachine.dispatchWorker).toHaveBeenCalledWith(expect.objectContaining({
+          repositoryRoot: worktree,
+          specPath: path.join(directory, "docs/spec.md"),
+        }));
+      });
+
       it("should reject acc_dispatch_wave if called from worker session (anti-recursion)", async () => {
         const mockPersonaManager = {
           getSessionPersona: vi.fn().mockReturnValue("worker"),
@@ -1269,6 +1295,80 @@ describe("Plugin Registered Tools (acc_dispatch_worker & acc_approve_plane_sync)
       });
     });
     describe("acc_status runtime introspection and pre-condition gating (v3.0)", () => {
+      it("isolates status and dispatch roots per runtime ToolContext instead of process.cwd()", async () => {
+        const projectA = await fsPromises.mkdtemp(path.join(os.tmpdir(), "acc-project-a-"));
+        const projectB = await fsPromises.mkdtemp(path.join(os.tmpdir(), "acc-project-b-"));
+        const worktreeA = path.join(projectA, "worktree");
+        const worktreeB = path.join(projectB, "worktree");
+        await Promise.all([
+          fsPromises.mkdir(worktreeA),
+          fsPromises.mkdir(worktreeB),
+        ]);
+        await Promise.all([
+          fsPromises.writeFile(path.join(projectA, "spec.md"), "# A"),
+          fsPromises.writeFile(path.join(projectB, "spec.md"), "# B"),
+        ]);
+
+        const stateMachine = {
+          evaluatePhysicalEvidence: vi.fn().mockReturnValue({ hasPrd: true }),
+          getPhysicalPipelinePhase: vi.fn().mockReturnValue("READY_FOR_DISPATCH"),
+          getPhase: vi.fn().mockReturnValue("SPEC_READY"),
+          dispatchWorker: vi.fn().mockResolvedValue({ status: "success" }),
+        };
+
+        try {
+          expect(process.cwd()).not.toBe(worktreeA);
+          expect(process.cwd()).not.toBe(worktreeB);
+          const hooks = await AccelerateOmoPlugin({} as any, { stateMachine: stateMachine as any });
+          const statusTool = hooks.tool?.acc_status;
+          const dispatchTool = hooks.tool?.acc_dispatch_worker;
+
+          await statusTool?.execute({}, { sessionID: "ses-a", directory: projectA, worktree: worktreeA } as any);
+          await statusTool?.execute({}, { sessionID: "ses-b", directory: projectB, worktree: worktreeB } as any);
+          await statusTool?.execute({ directory: "inspection" }, { sessionID: "ses-a", directory: projectA, worktree: worktreeA } as any);
+          await dispatchTool?.execute({ taskSlug: "a", targetDir: ".worktrees/a", specPath: "spec.md", prompt: "A" }, { sessionID: "ses-a", directory: projectA, worktree: worktreeA } as any);
+          await dispatchTool?.execute({ taskSlug: "b", targetDir: ".worktrees/b", specPath: "spec.md", prompt: "B" }, { sessionID: "ses-b", directory: projectB, worktree: worktreeB } as any);
+
+          expect(stateMachine.evaluatePhysicalEvidence).toHaveBeenNthCalledWith(1, projectA);
+          expect(stateMachine.evaluatePhysicalEvidence).toHaveBeenNthCalledWith(2, projectB);
+          expect(stateMachine.evaluatePhysicalEvidence).toHaveBeenNthCalledWith(3, path.join(projectA, "inspection"));
+          expect(stateMachine.getPhysicalPipelinePhase).toHaveBeenNthCalledWith(4, worktreeA);
+          expect(stateMachine.getPhysicalPipelinePhase).toHaveBeenNthCalledWith(5, worktreeB);
+          expect(stateMachine.dispatchWorker).toHaveBeenNthCalledWith(1, expect.objectContaining({
+            specPath: path.join(projectA, "spec.md"),
+            repositoryRoot: worktreeA,
+          }));
+          expect(stateMachine.dispatchWorker).toHaveBeenNthCalledWith(2, expect.objectContaining({
+            specPath: path.join(projectB, "spec.md"),
+            repositoryRoot: worktreeB,
+          }));
+        } finally {
+          await Promise.all([
+            fsPromises.rm(projectA, { recursive: true, force: true }),
+            fsPromises.rm(projectB, { recursive: true, force: true }),
+          ]);
+        }
+      });
+
+      it("rejects runtime dispatch without a worktree before side effects", async () => {
+        const stateMachine = {
+          getPhysicalPipelinePhase: vi.fn().mockReturnValue("READY_FOR_DISPATCH"),
+          getPhase: vi.fn().mockReturnValue("SPEC_READY"),
+          dispatchWorker: vi.fn(),
+        };
+        const hooks = await AccelerateOmoPlugin({} as any, { stateMachine: stateMachine as any });
+
+        await expect(
+          hooks.tool?.acc_dispatch_worker?.execute(
+            { taskSlug: "missing-context", targetDir: ".worktrees/missing", specPath: "spec.md", prompt: "work" },
+            { sessionID: "ses-runtime", directory: "/runtime/project" } as any
+          )
+        ).rejects.toThrow("[ACCELERATE CONTEXT REQUIRED]");
+
+        expect(stateMachine.getPhysicalPipelinePhase).not.toHaveBeenCalled();
+        expect(stateMachine.dispatchWorker).not.toHaveBeenCalled();
+      });
+
       it("acc_status returns running version, physical phase, evidence, and host info", async () => {
         const hooks = await AccelerateOmoPlugin({
           serverUrl: new URL("http://127.0.0.1:35113"),

@@ -17,6 +17,30 @@ export interface AcceleratePluginOptions {
   planeGate?: PlaneApprovalGateService;
 }
 
+type RuntimeToolContext = {
+  directory?: string;
+  worktree?: string;
+};
+
+const hasRuntimePathFields = (context: RuntimeToolContext | undefined): boolean =>
+  Boolean(context && ("directory" in context || "worktree" in context));
+
+const resolveStatusRoot = (context: RuntimeToolContext | undefined): string => {
+  if (typeof context?.directory === "string") return path.resolve(context.directory);
+  if (hasRuntimePathFields(context)) {
+    throw new Error("[ACCELERATE CONTEXT REQUIRED] ToolContext.directory is required.");
+  }
+  return process.cwd();
+};
+
+const resolveDispatchRoot = (context: RuntimeToolContext | undefined): string => {
+  if (typeof context?.worktree === "string") return path.resolve(context.worktree);
+  if (hasRuntimePathFields(context)) {
+    throw new Error("[ACCELERATE CONTEXT REQUIRED] ToolContext.worktree is required for dispatch.");
+  }
+  return process.cwd();
+};
+
 export const AccelerateOmoPlugin: Plugin = async (context, options?: AcceleratePluginOptions) => {
   const dynamicBaseUrl = context?.serverUrl
     ? context.serverUrl.toString().replace(/\/+$/, "")
@@ -35,7 +59,8 @@ export const AccelerateOmoPlugin: Plugin = async (context, options?: AccelerateP
         directory: z.string().optional().describe("Optional target directory to evaluate (defaults to workspace root)"),
       },
       execute: async (args, context) => {
-        const targetDir = args.directory ? path.resolve(process.cwd(), args.directory) : process.cwd();
+        const contextRoot = resolveStatusRoot(context as RuntimeToolContext | undefined);
+        const targetDir = args.directory ? path.resolve(contextRoot, args.directory) : contextRoot;
         const evidence = stateMachine.evaluatePhysicalEvidence(targetDir);
         const phase = stateMachine.getPhysicalPipelinePhase(targetDir);
 
@@ -67,6 +92,9 @@ export const AccelerateOmoPlugin: Plugin = async (context, options?: AccelerateP
         prompt: z.string().describe("Strict, self-contained implementation task prompt for the Worker"),
       },
       execute: async (args, context) => {
+        const runtimeContext = context as RuntimeToolContext | undefined;
+        const projectDirectory = resolveStatusRoot(runtimeContext);
+        const repositoryRoot = resolveDispatchRoot(runtimeContext);
         const sessionId = context?.sessionID || "";
         const messageId = context?.messageID || "";
         const persona = personaManager.getSessionPersona(sessionId);
@@ -74,7 +102,7 @@ export const AccelerateOmoPlugin: Plugin = async (context, options?: AccelerateP
           throw new Error("[ACCELERATE RECURSION DENIED] Workers are forbidden from dispatching child workers.");
         }
 
-        const physicalPhase = typeof stateMachine.getPhysicalPipelinePhase === "function" ? stateMachine.getPhysicalPipelinePhase(process.cwd()) : "READY_FOR_DISPATCH";
+        const physicalPhase = typeof stateMachine.getPhysicalPipelinePhase === "function" ? stateMachine.getPhysicalPipelinePhase(repositoryRoot) : "READY_FOR_DISPATCH";
         if (physicalPhase === "PRD_REQUIRED" || physicalPhase === "ADR_REQUIRED" || physicalPhase === "SDD_REQUIRED") {
           throw new Error(
             `[ACCELERATE PIPELINE BLOCKED] Cannot dispatch workers in phase '${physicalPhase}'. Master must author specifications first (PRD -> ADR -> SDD).`
@@ -91,7 +119,7 @@ export const AccelerateOmoPlugin: Plugin = async (context, options?: AccelerateP
 
         const resolvedSpecPath = path.isAbsolute(args.specPath)
           ? args.specPath
-          : path.resolve(process.cwd(), args.specPath);
+          : path.resolve(projectDirectory, args.specPath);
 
         const result = await stateMachine.dispatchWorker({
           taskSlug: args.taskSlug,
@@ -101,6 +129,7 @@ export const AccelerateOmoPlugin: Plugin = async (context, options?: AccelerateP
           prompt: args.prompt,
           masterSessionId: sessionId,
           triggerMessageId: messageId,
+          repositoryRoot,
         });
 
         return JSON.stringify(result, null, 2);
@@ -347,6 +376,9 @@ export const AccelerateOmoPlugin: Plugin = async (context, options?: AccelerateP
         ).min(1).describe("List of atomic tasks to dispatch in parallel"),
       },
       execute: async (args, context) => {
+        const runtimeContext = context as RuntimeToolContext | undefined;
+        const projectDirectory = resolveStatusRoot(runtimeContext);
+        const repositoryRoot = resolveDispatchRoot(runtimeContext);
         const masterSessionId = context?.sessionID || "";
         const triggerMessageId = context?.messageID || "";
         const persona = personaManager.getSessionPersona(masterSessionId);
@@ -354,7 +386,7 @@ export const AccelerateOmoPlugin: Plugin = async (context, options?: AccelerateP
           throw new Error("[ACCELERATE RECURSION DENIED] Workers are forbidden from dispatching child workers.");
         }
 
-        const physicalPhase = typeof stateMachine.getPhysicalPipelinePhase === "function" ? stateMachine.getPhysicalPipelinePhase(process.cwd()) : "READY_FOR_DISPATCH";
+        const physicalPhase = typeof stateMachine.getPhysicalPipelinePhase === "function" ? stateMachine.getPhysicalPipelinePhase(repositoryRoot) : "READY_FOR_DISPATCH";
         if (physicalPhase === "PRD_REQUIRED" || physicalPhase === "ADR_REQUIRED" || physicalPhase === "SDD_REQUIRED") {
           throw new Error(
             `[ACCELERATE PIPELINE BLOCKED] Cannot dispatch workers in phase '${physicalPhase}'. Master must author specifications first (PRD -> ADR -> SDD).`
@@ -366,7 +398,7 @@ export const AccelerateOmoPlugin: Plugin = async (context, options?: AccelerateP
         const dispatchPromises = args.tasks.map(async (task) => {
           const resolvedSpecPath = path.isAbsolute(task.specPath)
             ? task.specPath
-            : path.resolve(process.cwd(), task.specPath);
+            : path.resolve(projectDirectory, task.specPath);
 
           const result = await stateMachine.dispatchWorker({
             taskSlug: task.taskSlug,
@@ -376,6 +408,7 @@ export const AccelerateOmoPlugin: Plugin = async (context, options?: AccelerateP
             prompt: task.prompt,
             masterSessionId,
             triggerMessageId,
+            repositoryRoot,
           });
 
           return {
