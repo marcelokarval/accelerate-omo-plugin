@@ -555,6 +555,38 @@ export const AccelerateOmoPlugin: Plugin = async (context, options?: AccelerateP
      * Persona Injection: Intercepts incoming messages to detect [MASTER] vs [W-*] prefixes
      * and prepends the corresponding strict Mini-Skill instructions.
      */
+/**
+     * System Prompt Transform: Injects <PERSONA_GOVERNANCE> directly into the LLM system prompt stream.
+     * Zero user message contamination; strictly ordered with immutable static law first for cache efficiency.
+     */
+    "experimental.chat.system.transform": async (input, output) => {
+      const sessionID = input.sessionID;
+      if (!sessionID) return;
+
+      const persona = await personaManager.resolveSessionPersona(sessionID, openCodeClient);
+      if (persona === "standard") {
+        return; // Fail-closed: standard sessions receive no governance injection
+      }
+
+      const instructions = personaManager.getPersonaInstructions(persona);
+      if (!instructions) return;
+
+      // 1. Immutable static law first (preserves cache prefix across turns)
+      output.system.push(`<PERSONA_GOVERNANCE>\n${instructions}\n</PERSONA_GOVERNANCE>`);
+
+      // 2. Dynamic runtime context appended at the tail (does not invalidate prefix cache)
+      if (persona === "master") {
+        const projectDir = process.cwd();
+        const phase = typeof stateMachine.getPhysicalPipelinePhase === "function"
+          ? stateMachine.getPhysicalPipelinePhase(projectDir)
+          : "READY_FOR_DISPATCH";
+
+        output.system.push(
+          `[ACCELERATE RUNTIME CONTEXT]\n• Session: ${sessionID}\n• Physical Phase: ${phase}\n• Directory: ${projectDir}`
+        );
+      }
+    },
+
     "chat.message": async (input, output) => {
       const { sessionID } = input;
       let persona = await personaManager.resolveSessionPersona(sessionID, openCodeClient);
@@ -576,12 +608,6 @@ export const AccelerateOmoPlugin: Plugin = async (context, options?: AccelerateP
           }
         }
 
-        if (persona !== "standard") {
-          const instructions = personaManager.getPersonaInstructions(persona);
-          if (instructions && !firstPart.text.includes(instructions)) {
-            firstPart.text = `<PERSONA_GOVERNANCE>\n${instructions}\n</PERSONA_GOVERNANCE>\n\n${firstPart.text}`;
-          }
-        }
       }
     },
   };
