@@ -144,10 +144,20 @@ describe("Plugin Registered Tools (acc_dispatch_worker & acc_approve_plane_sync)
     expect(beforeHook).toBeDefined();
     expect(chatHook).toBeDefined();
 
-    // In chat.message, if firstPart.text has [MASTER], it injects governance
+    // In chat.message, user text remains 100% clean and pristine
     const output = { parts: [{ type: "text", text: "[MASTER] Plan project" }] };
     await chatHook({ sessionID: "ses-chat-master" }, output);
-    expect(output.parts[0].text).toContain("<PERSONA_GOVERNANCE>");
+    expect(output.parts[0].text).toBe("[MASTER] Plan project");
+    expect(output.parts[0].text).not.toContain("<PERSONA_GOVERNANCE>");
+
+    // In experimental.chat.system.transform, governance is cleanly injected into system prompt
+    const systemHook = hooks["experimental.chat.system.transform"];
+    expect(systemHook).toBeDefined();
+    const systemOutput = { system: [] as string[] };
+    await systemHook({ sessionID: "ses-chat-master" }, systemOutput);
+    expect(systemOutput.system.length).toBeGreaterThanOrEqual(1);
+    expect(systemOutput.system[0]).toContain("<PERSONA_GOVERNANCE>");
+    expect(systemOutput.system[0]).toContain("ACCELERATE MASTER ORCHESTRATOR LAW");
 
     // In tool.execute.before, master is blocked from edit
     await expect(
@@ -668,8 +678,17 @@ describe("Plugin Registered Tools (acc_dispatch_worker & acc_approve_plane_sync)
 
         await chatHook?.({ sessionID: "ses_generic_test" }, messageOutput as any);
 
-        expect(messageOutput.parts[0].text).toContain("<PERSONA_GOVERNANCE>");
-        expect(messageOutput.parts[0].text).toContain("ACCELERATE MASTER ORCHESTRATOR LAW");
+        // User message remains 100% clean and pristine
+        expect(messageOutput.parts[0].text).toBe("Você é o master desta sessão de continuidade. Leia o relatório e planeje a limpeza da raiz.");
+        expect(messageOutput.parts[0].text).not.toContain("<PERSONA_GOVERNANCE>");
+
+        // System prompt hook delivers the governance law with immutable static prefix
+        const systemHook = hooks["experimental.chat.system.transform"];
+        const systemOutput = { system: [] as string[] };
+        await systemHook?.({ sessionID: "ses_generic_test" }, systemOutput);
+        expect(systemOutput.system[0]).toContain("<PERSONA_GOVERNANCE>");
+        expect(systemOutput.system[0]).toContain("ACCELERATE MASTER ORCHESTRATOR LAW");
+        expect(systemOutput.system[1]).toContain("[ACCELERATE RUNTIME CONTEXT]");
 
         expect(mockOpenCodeClient.updateSession).toHaveBeenCalled();
         expect(updatedTitle).toMatch(/^\[MASTER\] /);
@@ -725,6 +744,16 @@ describe("Plugin Registered Tools (acc_dispatch_worker & acc_approve_plane_sync)
             prompt: "do work",
           }, { sessionID: "ses_master" } as any)
         ).rejects.toThrow(/Cannot dispatch workers in phase/);
+      });
+    });
+    describe("experimental.chat.system.transform cache optimization and fail-closed isolation", () => {
+      it("leaves output.system completely untouched when session persona is standard", async () => {
+        const hooks = await AccelerateOmoPlugin({} as any);
+        const systemHook = hooks["experimental.chat.system.transform"];
+        const systemOutput = { system: ["Base system prompt"] };
+
+        await systemHook?.({ sessionID: "ses-standard-user" }, systemOutput);
+        expect(systemOutput.system).toEqual(["Base system prompt"]);
       });
     });
 
