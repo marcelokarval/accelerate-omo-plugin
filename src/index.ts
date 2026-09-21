@@ -153,7 +153,7 @@ export const AccelerateOmoPlugin: Plugin = async (context, options?: AccelerateP
     }),
 
     session_rename: tool({
-      description: "Renames the current OpenCode session title in the database and web UI. Defaults to active session if sessionId is omitted.",
+      description: "Renames the current OpenCode session title in the database and web UI without altering registered session persona. Defaults to active session if sessionId is omitted.",
       args: {
         title: z.string().min(1).describe("The new title for the session"),
         sessionId: z.string().optional().describe("Optional target session ID; defaults to current session ID"),
@@ -165,15 +165,14 @@ export const AccelerateOmoPlugin: Plugin = async (context, options?: AccelerateP
         }
 
         await openCodeClient.updateSession(targetSessionId, { title: args.title });
-        const newPersona = personaManager.detectPersonaFromTitle(args.title);
-        personaManager.registerSessionPersona(targetSessionId, newPersona);
+        const currentPersona = personaManager.getSessionPersona(targetSessionId);
 
         return JSON.stringify(
           {
             status: "success",
             sessionId: targetSessionId,
             title: args.title,
-            persona: newPersona,
+            persona: currentPersona,
           },
           null,
           2
@@ -213,7 +212,7 @@ export const AccelerateOmoPlugin: Plugin = async (context, options?: AccelerateP
     }),
 
     acc_set_session_title: tool({
-      description: "Updates an OpenCode session title and registers the corresponding Accelerate persona (alias of session_rename).",
+      description: "Updates an OpenCode session title without altering registered persona (alias of session_rename).",
       args: {
         title: z.string().min(1).describe("The new title for the session"),
         sessionId: z.string().optional().describe("Optional target session ID; defaults to current session ID"),
@@ -225,15 +224,14 @@ export const AccelerateOmoPlugin: Plugin = async (context, options?: AccelerateP
         }
 
         await openCodeClient.updateSession(targetSessionId, { title: args.title });
-        const newPersona = personaManager.detectPersonaFromTitle(args.title);
-        personaManager.registerSessionPersona(targetSessionId, newPersona);
+        const currentPersona = personaManager.getSessionPersona(targetSessionId);
 
         return JSON.stringify(
           {
             status: "success",
             sessionId: targetSessionId,
             title: args.title,
-            persona: newPersona,
+            persona: currentPersona,
           },
           null,
           2
