@@ -273,7 +273,7 @@ export const AccelerateOmoPlugin: Plugin = async (context, options?: AccelerateP
     }),
 
     acc_fanin_worker: tool({
-      description: "Automates Worker fan-in: runs verification suite, audits diff, merges branch with --no-ff, and removes worktree.",
+      description: "Worker fan-in tool (temporarily blocked in this development version). Returns a blocked status pending candidate-bound verification and independent review qualification.",
       args: {
         targetDir: z.string().describe("Path to target worktree"),
         testCommand: z.string().optional().default("npm test").describe("Verification command to execute in worktree"),
@@ -281,65 +281,12 @@ export const AccelerateOmoPlugin: Plugin = async (context, options?: AccelerateP
         report: WorkerCompletionReportSchema.optional().describe("Optional structured Worker completion report"),
       },
       execute: async (args, context) => {
-        const resolvedTargetDir = path.isAbsolute(args.targetDir)
-          ? args.targetDir
-          : path.resolve(process.cwd(), args.targetDir);
-
-        try {
-          await fs.access(resolvedTargetDir);
-        } catch {
-          throw new Error(`[ACCELERATE FANIN ERROR] Worktree directory does not exist: ${resolvedTargetDir}`);
-        }
-
-        if (args.report) {
-          WorkerCompletionReportSchema.parse(args.report);
-        }
-
-        const verification = await worktreeService.runVerification(resolvedTargetDir, args.testCommand);
-        if (verification.exitCode !== 0) {
-          await worktreeService.quarantine({
-            path: resolvedTargetDir,
-            reason: "verification_failed",
-          });
-          return JSON.stringify(
-            {
-              status: "error",
-              error: "verification_failed",
-              quarantined: true,
-              exitCode: verification.exitCode,
-              output: verification.output,
-            },
-            null,
-            2
-          );
-        }
-
-        const worktrees = await worktreeService.list();
-        const matched = worktrees.find((wt) => path.resolve(wt.path) === resolvedTargetDir);
-        let branchToMerge = matched?.branch;
-        if (branchToMerge && branchToMerge.startsWith("refs/heads/")) {
-          branchToMerge = branchToMerge.replace("refs/heads/", "");
-        }
-
-        if (!branchToMerge) {
-          branchToMerge = path.basename(resolvedTargetDir);
-        }
-
-        const { commitHash } = await worktreeService.mergeBranch(branchToMerge, args.targetBranch);
-
-        try {
-          await worktreeService.remove({ path: resolvedTargetDir, force: true });
-        } catch {
-        }
-
         return JSON.stringify(
           {
-            status: "success",
-            targetDir: args.targetDir,
-            mergedBranch: branchToMerge,
-            targetBranch: args.targetBranch,
-            commitHash,
-            testOutput: verification.output,
+            status: "blocked",
+            reason: "fanin_not_qualified",
+            executed: false,
+            message: "Automatic integration is temporarily unavailable pending candidate-bound verification and independent review. No verification command, checkout, merge, quarantine or cleanup was performed.",
           },
           null,
           2

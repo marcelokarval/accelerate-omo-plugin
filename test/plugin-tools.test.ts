@@ -264,22 +264,30 @@ describe("Plugin Registered Tools (acc_dispatch_worker & acc_approve_plane_sync)
     });
   });
 
-  describe("acc_fanin_worker", () => {
-    it("should successfully run verification, merge branch, remove worktree, and return success receipt", async () => {
+  describe("acc_fanin_worker (P2-A containment)", () => {
+    const validReport = {
+      delegationId: "del_valid123",
+      taskSlug: "fanin-task",
+      status: "success" as const,
+      touchedFiles: ["src/feature.ts"],
+      testResults: {
+        command: "npm test",
+        passed: 5,
+        failed: 0,
+        exitCode: 0,
+      },
+      buildStatus: "clean" as const,
+      diffSummary: "1 file changed, 10 insertions(+)",
+      invariantsSatisfied: ["TDD Iron Law"],
+    };
+
+    it("returns blocked with fanin_not_qualified and executed: false when called without report, with zero side-effects", async () => {
       const mockWorktreeService = {
-        runVerification: vi.fn().mockResolvedValue({
-          exitCode: 0,
-          output: "all tests passed\n",
-        }),
-        list: vi.fn().mockResolvedValue([
-          {
-            path: "/tmp/test-fanin-worktree",
-            branch: "refs/heads/accelerate/acc-task-test",
-          },
-        ]),
-        mergeBranch: vi.fn().mockResolvedValue({ commitHash: "c0ffee123" }),
-        remove: vi.fn().mockResolvedValue({ path: "/tmp/test-fanin-worktree" }),
-        quarantine: vi.fn(),
+        runVerification: vi.fn().mockImplementation(() => { throw new Error("SIDE_EFFECT: runVerification was called!"); }),
+        list: vi.fn().mockImplementation(() => { throw new Error("SIDE_EFFECT: list was called!"); }),
+        mergeBranch: vi.fn().mockImplementation(() => { throw new Error("SIDE_EFFECT: mergeBranch was called!"); }),
+        remove: vi.fn().mockImplementation(() => { throw new Error("SIDE_EFFECT: remove was called!"); }),
+        quarantine: vi.fn().mockImplementation(() => { throw new Error("SIDE_EFFECT: quarantine was called!"); }),
       };
 
       const hooks = await AccelerateOmoPlugin({} as any, {
@@ -288,63 +296,30 @@ describe("Plugin Registered Tools (acc_dispatch_worker & acc_approve_plane_sync)
       const faninTool = hooks.tool?.acc_fanin_worker;
       expect(faninTool).toBeDefined();
 
-      const fs = await import("node:fs");
-      const targetDir = "/tmp/test-fanin-worktree";
-      fs.mkdirSync(targetDir, { recursive: true });
+      const resStr = await faninTool?.execute({
+        targetDir: "/non/existent/worktree/path",
+      }, { sessionID: "ses_master", messageID: "msg_1" } as any);
 
-      try {
-        const resultStr = await faninTool?.execute({
-          targetDir,
-          testCommand: "npm test",
-          targetBranch: "master",
-          report: {
-            delegationId: "del_fanin123",
-            taskSlug: "fanin-task",
-            status: "success",
-            touchedFiles: ["src/feature.ts"],
-            testResults: {
-              command: "npm test",
-              passed: 5,
-              failed: 0,
-              exitCode: 0,
-            },
-            buildStatus: "clean",
-            diffSummary: "1 file changed, 10 insertions(+)",
-            invariantsSatisfied: ["TDD Iron Law"],
-          },
-        }, { sessionID: "ses_master_audit", messageID: "msg_fanin" } as any);
+      const res = JSON.parse(resStr);
+      expect(res.status).toBe("blocked");
+      expect(res.reason).toBe("fanin_not_qualified");
+      expect(res.executed).toBe(false);
+      expect(res.message).toContain("Automatic integration is temporarily unavailable");
 
-        const result = JSON.parse(resultStr);
-        expect(result.status).toBe("success");
-        expect(result.targetDir).toBe(targetDir);
-        expect(result.mergedBranch).toBe("accelerate/acc-task-test");
-        expect(result.targetBranch).toBe("master");
-        expect(result.commitHash).toBe("c0ffee123");
-        expect(result.testOutput).toContain("all tests passed");
-
-        expect(mockWorktreeService.runVerification).toHaveBeenCalledWith(targetDir, "npm test");
-        expect(mockWorktreeService.mergeBranch).toHaveBeenCalledWith("accelerate/acc-task-test", "master");
-        expect(mockWorktreeService.remove).toHaveBeenCalledWith({ path: targetDir, force: true });
-      } finally {
-        if (fs.existsSync(targetDir)) {
-          fs.rmdirSync(targetDir);
-        }
-      }
+      expect(mockWorktreeService.runVerification).not.toHaveBeenCalled();
+      expect(mockWorktreeService.list).not.toHaveBeenCalled();
+      expect(mockWorktreeService.mergeBranch).not.toHaveBeenCalled();
+      expect(mockWorktreeService.remove).not.toHaveBeenCalled();
+      expect(mockWorktreeService.quarantine).not.toHaveBeenCalled();
     });
 
-    it("should quarantine worktree and return error without merging when verification fails", async () => {
+    it("returns blocked with fanin_not_qualified and executed: false when called with valid report, with zero side-effects", async () => {
       const mockWorktreeService = {
-        runVerification: vi.fn().mockResolvedValue({
-          exitCode: 1,
-          output: "Tests failed with exit code 1",
-        }),
-        quarantine: vi.fn().mockResolvedValue({
-          originalPath: "/tmp/test-fanin-fail",
-          quarantinedPath: "/tmp/quarantine/test-fanin-fail",
-        }),
-        list: vi.fn(),
-        mergeBranch: vi.fn(),
-        remove: vi.fn(),
+        runVerification: vi.fn().mockImplementation(() => { throw new Error("SIDE_EFFECT: runVerification was called!"); }),
+        list: vi.fn().mockImplementation(() => { throw new Error("SIDE_EFFECT: list was called!"); }),
+        mergeBranch: vi.fn().mockImplementation(() => { throw new Error("SIDE_EFFECT: mergeBranch was called!"); }),
+        remove: vi.fn().mockImplementation(() => { throw new Error("SIDE_EFFECT: remove was called!"); }),
+        quarantine: vi.fn().mockImplementation(() => { throw new Error("SIDE_EFFECT: quarantine was called!"); }),
       };
 
       const hooks = await AccelerateOmoPlugin({} as any, {
@@ -352,50 +327,89 @@ describe("Plugin Registered Tools (acc_dispatch_worker & acc_approve_plane_sync)
       });
       const faninTool = hooks.tool?.acc_fanin_worker;
 
-      const fs = await import("node:fs");
-      const targetDir = "/tmp/test-fanin-fail";
-      fs.mkdirSync(targetDir, { recursive: true });
+      const resStr = await faninTool?.execute({
+        targetDir: "/non/existent/worktree/path",
+        report: validReport,
+      }, { sessionID: "ses_master", messageID: "msg_2" } as any);
 
-      try {
-        const resultStr = await faninTool?.execute({
-          targetDir,
-          testCommand: "npm test",
-          targetBranch: "master",
-        }, { sessionID: "ses_master_fail", messageID: "msg_fanin_fail" } as any);
+      const res = JSON.parse(resStr);
+      expect(res.status).toBe("blocked");
+      expect(res.reason).toBe("fanin_not_qualified");
+      expect(res.executed).toBe(false);
 
-        const result = JSON.parse(resultStr);
-        expect(result.status).toBe("error");
-        expect(result.quarantined).toBe(true);
-        expect(result.error).toContain("verification_failed");
-        expect(mockWorktreeService.quarantine).toHaveBeenCalledWith({
-          path: targetDir,
-          reason: "verification_failed",
-        });
-        expect(mockWorktreeService.mergeBranch).not.toHaveBeenCalled();
-      } finally {
-        if (fs.existsSync(targetDir)) {
-          fs.rmdirSync(targetDir);
-        }
-      }
+      expect(mockWorktreeService.runVerification).not.toHaveBeenCalled();
+      expect(mockWorktreeService.list).not.toHaveBeenCalled();
+      expect(mockWorktreeService.mergeBranch).not.toHaveBeenCalled();
+      expect(mockWorktreeService.remove).not.toHaveBeenCalled();
+      expect(mockWorktreeService.quarantine).not.toHaveBeenCalled();
     });
 
+    it("returns blocked with fanin_not_qualified and executed: false when called with testCommand explicitly provided, with zero side-effects", async () => {
+      const mockWorktreeService = {
+        runVerification: vi.fn().mockImplementation(() => { throw new Error("SIDE_EFFECT: runVerification was called!"); }),
+        list: vi.fn().mockImplementation(() => { throw new Error("SIDE_EFFECT: list was called!"); }),
+        mergeBranch: vi.fn().mockImplementation(() => { throw new Error("SIDE_EFFECT: mergeBranch was called!"); }),
+        remove: vi.fn().mockImplementation(() => { throw new Error("SIDE_EFFECT: remove was called!"); }),
+        quarantine: vi.fn().mockImplementation(() => { throw new Error("SIDE_EFFECT: quarantine was called!"); }),
+      };
 
-    it("should reject invalid worker completion report schema", async () => {
-      const hooks = await AccelerateOmoPlugin({} as any);
+      const hooks = await AccelerateOmoPlugin({} as any, {
+        worktreeService: mockWorktreeService as any,
+      });
       const faninTool = hooks.tool?.acc_fanin_worker;
 
-      await expect(
-        faninTool?.execute({
-          targetDir: "/tmp/non-existent",
-          report: {
-            invalid: "data",
-          } as any,
-        }, {} as any)
-      ).rejects.toThrow();
+      const resStr = await faninTool?.execute({
+        targetDir: "/non/existent/worktree/path",
+        testCommand: "pytest tests/custom",
+        targetBranch: "main",
+      }, { sessionID: "ses_master", messageID: "msg_3" } as any);
+
+      const res = JSON.parse(resStr);
+      expect(res.status).toBe("blocked");
+      expect(res.reason).toBe("fanin_not_qualified");
+      expect(res.executed).toBe(false);
+
+      expect(mockWorktreeService.runVerification).not.toHaveBeenCalled();
+      expect(mockWorktreeService.list).not.toHaveBeenCalled();
+      expect(mockWorktreeService.mergeBranch).not.toHaveBeenCalled();
+      expect(mockWorktreeService.remove).not.toHaveBeenCalled();
+      expect(mockWorktreeService.quarantine).not.toHaveBeenCalled();
+    });
+
+    it("returns blocked consistently on repeated calls without state mutation", async () => {
+      const mockWorktreeService = {
+        runVerification: vi.fn().mockImplementation(() => { throw new Error("SIDE_EFFECT: runVerification was called!"); }),
+        list: vi.fn().mockImplementation(() => { throw new Error("SIDE_EFFECT: list was called!"); }),
+        mergeBranch: vi.fn().mockImplementation(() => { throw new Error("SIDE_EFFECT: mergeBranch was called!"); }),
+        remove: vi.fn().mockImplementation(() => { throw new Error("SIDE_EFFECT: remove was called!"); }),
+        quarantine: vi.fn().mockImplementation(() => { throw new Error("SIDE_EFFECT: quarantine was called!"); }),
+      };
+
+      const hooks = await AccelerateOmoPlugin({} as any, {
+        worktreeService: mockWorktreeService as any,
+      });
+      const faninTool = hooks.tool?.acc_fanin_worker;
+
+      for (let i = 0; i < 3; i++) {
+        const resStr = await faninTool?.execute({
+          targetDir: "/any/repeated/call",
+        }, { sessionID: "ses_master", messageID: "msg_loop_" + i } as any);
+
+        const res = JSON.parse(resStr);
+        expect(res.status).toBe("blocked");
+        expect(res.reason).toBe("fanin_not_qualified");
+        expect(res.executed).toBe(false);
+      }
+
+      expect(mockWorktreeService.runVerification).not.toHaveBeenCalled();
+      expect(mockWorktreeService.list).not.toHaveBeenCalled();
+      expect(mockWorktreeService.mergeBranch).not.toHaveBeenCalled();
+      expect(mockWorktreeService.remove).not.toHaveBeenCalled();
+      expect(mockWorktreeService.quarantine).not.toHaveBeenCalled();
     });
   });
 
-  describe("Wave 3: acc_dispatch_wave, acc_poll_workers, and acc_execute_plane_sync", () => {
+    describe("Wave 3: acc_dispatch_wave, acc_poll_workers, and acc_execute_plane_sync", () => {
     describe("acc_dispatch_wave", () => {
       it("should register acc_dispatch_wave tool", async () => {
         const hooks = await AccelerateOmoPlugin({} as any);
