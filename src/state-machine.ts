@@ -48,6 +48,7 @@ export interface WorkerDispatchConfig {
   masterSessionId?: string;
   triggerMessageId?: string;
   timeoutMs?: number;
+  repositoryRoot?: string;
 }
 
 export interface WorkerRunResult {
@@ -185,11 +186,13 @@ export class StateMachineService {
     let worktreeResult;
 
     try {
-      worktreeResult = await this.worktreeService.create({
+      const createOptions = {
         path: config.targetDir,
         branch: branchName,
         baseRef: config.baseRef || "HEAD",
-      });
+        ...(config.repositoryRoot ? { repositoryRoot: config.repositoryRoot } : {}),
+      };
+      worktreeResult = await this.worktreeService.create(createOptions);
     } catch (err: any) {
       if (this.currentPhase !== "FAILED") this.transitionTo("FAILED");
       return {
@@ -213,7 +216,11 @@ export class StateMachineService {
         title: `⚡ [W-${config.taskSlug}] Isolated Task Execution`,
       });
     } catch (err: any) {
-      await this.worktreeService.remove({ path: worktreePath, force: true });
+      await this.worktreeService.remove({
+        path: worktreePath,
+        force: true,
+        ...(config.repositoryRoot ? { repositoryRoot: config.repositoryRoot } : {}),
+      });
       if (this.currentPhase !== "FAILED") this.transitionTo("FAILED");
       return {
         status: "error",
@@ -248,7 +255,11 @@ export class StateMachineService {
         provenance,
       };
     } catch (err: any) {
-      await this.worktreeService.quarantine({ path: worktreePath, reason: "dispatch_failure" });
+      await this.worktreeService.quarantine({
+        path: worktreePath,
+        reason: "dispatch_failure",
+        ...(config.repositoryRoot ? { repositoryRoot: config.repositoryRoot } : {}),
+      });
       if (this.currentPhase !== "FAILED") this.transitionTo("FAILED");
       return {
         status: "error",

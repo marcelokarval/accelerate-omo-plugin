@@ -71,6 +71,7 @@ describe("StateMachineService & Fail-Closed Dispatch (Task 6)", () => {
       prompt: "Implement adapter",
       masterSessionId: "ses_master_test",
       triggerMessageId: "msg_trigger_test",
+      repositoryRoot: "/tmp/project-root",
     });
 
     expect(result.status).toBe("success");
@@ -87,6 +88,7 @@ describe("StateMachineService & Fail-Closed Dispatch (Task 6)", () => {
       path: "/tmp/worktree-123",
       branch: expect.stringContaining("accelerate/stripe-adapter-"),
       baseRef: "HEAD",
+      repositoryRoot: "/tmp/project-root",
     });
     expect(client.createSession).toHaveBeenCalled();
     expect(client.prompt).toHaveBeenCalledWith("ses_test_123", "Implement adapter");
@@ -117,6 +119,7 @@ describe("StateMachineService & Fail-Closed Dispatch (Task 6)", () => {
       specPath: "package.json",
       baseRef: "HEAD",
       prompt: "broken",
+      repositoryRoot: "/tmp/project-root",
     });
 
     expect(result.status).toBe("error");
@@ -124,6 +127,27 @@ describe("StateMachineService & Fail-Closed Dispatch (Task 6)", () => {
     expect(worktreeService.quarantine).toHaveBeenCalledWith({
       path: "/tmp/worktree-123",
       reason: "dispatch_failure",
+      repositoryRoot: "/tmp/project-root",
+    });
+  });
+
+  it("uses the operation root when cleaning up a session creation failure", async () => {
+    stateMachine.transitionTo("SPEC_READY");
+    vi.spyOn(client, "createSession").mockRejectedValue(new Error("Session unavailable"));
+
+    const result = await stateMachine.dispatchWorker({
+      taskSlug: "session-failure",
+      targetDir: "/tmp/worktree-123",
+      specPath: "package.json",
+      prompt: "broken",
+      repositoryRoot: "/tmp/project-root",
+    });
+
+    expect(result.status).toBe("error");
+    expect(worktreeService.remove).toHaveBeenCalledWith({
+      path: "/tmp/worktree-123",
+      force: true,
+      repositoryRoot: "/tmp/project-root",
     });
   });
   describe("Physical Disk-Anchored FSM (Accelerate v3.0)", () => {
