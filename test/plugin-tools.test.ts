@@ -254,53 +254,22 @@ describe("Plugin Registered Tools (acc_dispatch_worker & acc_approve_plane_sync)
     });
   });
 
-  describe("session_rename & acc_set_session_title persona preservation (P3-B1)", () => {
+  describe("session_rename & acc_set_session_title result truthfulness & persona preservation (P3-B2)", () => {
     const renamingTools = ["session_rename", "acc_set_session_title"] as const;
 
     for (const toolName of renamingTools) {
       describe(`Tool: ${toolName}`, () => {
-        it("1. Worker registered renamed with title containing [MASTER] remains Worker", async () => {
+        // 1. Valid response with same id and expected title -> success, observed title, persona preserved
+        it("1. Valid response confirms rename: returns success, observed title from response, and preserves persona", async () => {
           const { PersonaManager } = await import("../src/persona-manager.js");
           const pm = new PersonaManager();
-          pm.registerSessionPersona("ses-worker-registered", "worker");
+          pm.registerSessionPersona("ses-confirmed-1", "worker");
 
           const mockClient = {
-            updateSession: vi.fn().mockResolvedValue({ id: "ses-worker-registered", title: "[MASTER] Sneaky Worker" }),
-            getSession: vi.fn().mockResolvedValue({ id: "ses-worker-registered", title: "[MASTER] Sneaky Worker" }),
-          };
-
-          const hooks = await AccelerateOmoPlugin({} as any, {
-            personaManager: pm,
-            openCodeClient: mockClient as any,
-          });
-
-          const renameTool = hooks.tool?.[toolName];
-          expect(renameTool).toBeDefined();
-
-          const resStr = await renameTool?.execute({
-            sessionId: "ses-worker-registered",
-            title: "[MASTER] Sneaky Worker",
-          }, { sessionID: "ses-caller" } as any);
-
-          const res = JSON.parse(resStr);
-          expect(res.status).toBe("success");
-          expect(res.sessionId).toBe("ses-worker-registered");
-          expect(res.title).toBe("[MASTER] Sneaky Worker");
-          expect(res.persona).toBe("worker"); // MUST NOT be reclassified to master
-
-          // Invariant: PersonaManager registration remains Worker
-          expect(pm.getSessionPersona("ses-worker-registered")).toBe("worker");
-          expect(mockClient.updateSession).toHaveBeenCalledWith("ses-worker-registered", { title: "[MASTER] Sneaky Worker" });
-        });
-
-        it("2. Master registered renamed with plain title remains Master", async () => {
-          const { PersonaManager } = await import("../src/persona-manager.js");
-          const pm = new PersonaManager();
-          pm.registerSessionPersona("ses-master-registered", "master");
-
-          const mockClient = {
-            updateSession: vi.fn().mockResolvedValue({ id: "ses-master-registered", title: "Plain Discussion Topic" }),
-            getSession: vi.fn().mockResolvedValue({ id: "ses-master-registered", title: "Plain Discussion Topic" }),
+            updateSession: vi.fn().mockResolvedValue({
+              id: "ses-confirmed-1",
+              title: "Verified New Title",
+            }),
           };
 
           const hooks = await AccelerateOmoPlugin({} as any, {
@@ -310,24 +279,28 @@ describe("Plugin Registered Tools (acc_dispatch_worker & acc_approve_plane_sync)
 
           const renameTool = hooks.tool?.[toolName];
           const resStr = await renameTool?.execute({
-            sessionId: "ses-master-registered",
-            title: "Plain Discussion Topic",
+            sessionId: "ses-confirmed-1",
+            title: "Verified New Title",
           }, { sessionID: "ses-caller" } as any);
 
           const res = JSON.parse(resStr);
           expect(res.status).toBe("success");
-          expect(res.persona).toBe("master"); // MUST NOT drop master to standard
-          expect(pm.getSessionPersona("ses-master-registered")).toBe("master");
+          expect(res.sessionId).toBe("ses-confirmed-1");
+          expect(res.title).toBe("Verified New Title");
+          expect(res.persona).toBe("worker");
+
+          expect(pm.getSessionPersona("ses-confirmed-1")).toBe("worker");
+          expect(mockClient.updateSession).toHaveBeenCalledWith("ses-confirmed-1", { title: "Verified New Title" });
         });
 
-        it("3. Master registered renamed with title containing [W-TEST] remains Master", async () => {
+        // 2. Response null (simulating 404, 500, network failure) -> unconfirmed, never success
+        it("2. Response null: returns unconfirmed status with rename_not_confirmed reason and never success", async () => {
           const { PersonaManager } = await import("../src/persona-manager.js");
           const pm = new PersonaManager();
-          pm.registerSessionPersona("ses-master-registered-2", "master");
+          pm.registerSessionPersona("ses-null-test", "master");
 
           const mockClient = {
-            updateSession: vi.fn().mockResolvedValue({ id: "ses-master-registered-2", title: "⚡ [W-TEST] Not Really A Worker" }),
-            getSession: vi.fn().mockResolvedValue({ id: "ses-master-registered-2", title: "⚡ [W-TEST] Not Really A Worker" }),
+            updateSession: vi.fn().mockResolvedValue(null),
           };
 
           const hooks = await AccelerateOmoPlugin({} as any, {
@@ -337,24 +310,76 @@ describe("Plugin Registered Tools (acc_dispatch_worker & acc_approve_plane_sync)
 
           const renameTool = hooks.tool?.[toolName];
           const resStr = await renameTool?.execute({
-            sessionId: "ses-master-registered-2",
-            title: "⚡ [W-TEST] Not Really A Worker",
+            sessionId: "ses-null-test",
+            title: "Desired Title",
           }, { sessionID: "ses-caller" } as any);
 
           const res = JSON.parse(resStr);
-          expect(res.status).toBe("success");
-          expect(res.persona).toBe("master"); // MUST NOT be demoted to worker
-          expect(pm.getSessionPersona("ses-master-registered-2")).toBe("master");
+          expect(res.status).toBe("unconfirmed");
+          expect(res.reason).toBe("rename_not_confirmed");
+          expect(res.sessionId).toBe("ses-null-test");
+          expect(res.requestedTitle).toBe("Desired Title");
+          expect(res.persona).toBe("master");
+
+          // Invariant: Persona remains intact
+          expect(pm.getSessionPersona("ses-null-test")).toBe("master");
         });
 
-        it("4. Unregistered session does not receive direct assignment from rename handler", async () => {
+        // 3. Response without id or without title -> unconfirmed
+        it("3. Response missing id or title: returns unconfirmed", async () => {
           const { PersonaManager } = await import("../src/persona-manager.js");
           const pm = new PersonaManager();
-          // ses-unregistered has NO registration in pm
+          pm.registerSessionPersona("ses-incomplete-1", "worker");
+
+          const mockClientMissingTitle = {
+            updateSession: vi.fn().mockResolvedValue({ id: "ses-incomplete-1" }), // missing title
+          };
+
+          const hooks1 = await AccelerateOmoPlugin({} as any, {
+            personaManager: pm,
+            openCodeClient: mockClientMissingTitle as any,
+          });
+
+          const renameTool1 = hooks1.tool?.[toolName];
+          const res1 = JSON.parse(await renameTool1?.execute({
+            sessionId: "ses-incomplete-1",
+            title: "Target Title",
+          }, {} as any));
+
+          expect(res1.status).toBe("unconfirmed");
+          expect(res1.reason).toBe("rename_not_confirmed");
+
+          const mockClientMissingId = {
+            updateSession: vi.fn().mockResolvedValue({ title: "Target Title" }), // missing id
+          };
+
+          const hooks2 = await AccelerateOmoPlugin({} as any, {
+            personaManager: pm,
+            openCodeClient: mockClientMissingId as any,
+          });
+
+          const renameTool2 = hooks2.tool?.[toolName];
+          const res2 = JSON.parse(await renameTool2?.execute({
+            sessionId: "ses-incomplete-1",
+            title: "Target Title",
+          }, {} as any));
+
+          expect(res2.status).toBe("unconfirmed");
+          expect(res2.reason).toBe("rename_not_confirmed");
+          expect(pm.getSessionPersona("ses-incomplete-1")).toBe("worker");
+        });
+
+        // 4. Response with id of another session -> unconfirmed
+        it("4. Response with divergent sessionId: returns unconfirmed", async () => {
+          const { PersonaManager } = await import("../src/persona-manager.js");
+          const pm = new PersonaManager();
+          pm.registerSessionPersona("ses-intended", "master");
 
           const mockClient = {
-            updateSession: vi.fn().mockResolvedValue({ id: "ses-unregistered", title: "[MASTER] Attempted Self-Promotion" }),
-            getSession: vi.fn().mockResolvedValue({ id: "ses-unregistered", title: "[MASTER] Attempted Self-Promotion" }),
+            updateSession: vi.fn().mockResolvedValue({
+              id: "ses-different-session",
+              title: "Some Title",
+            }),
           };
 
           const hooks = await AccelerateOmoPlugin({} as any, {
@@ -363,24 +388,55 @@ describe("Plugin Registered Tools (acc_dispatch_worker & acc_approve_plane_sync)
           });
 
           const renameTool = hooks.tool?.[toolName];
-          const resStr = await renameTool?.execute({
-            sessionId: "ses-unregistered",
-            title: "[MASTER] Attempted Self-Promotion",
-          }, { sessionID: "ses-caller" } as any);
+          const res = JSON.parse(await renameTool?.execute({
+            sessionId: "ses-intended",
+            title: "Some Title",
+          }, {} as any));
 
-          const res = JSON.parse(resStr);
-          expect(res.status).toBe("success");
-          expect(res.persona).toBe("standard"); // Handler must NOT register it as master!
-          expect(pm.getSessionPersona("ses-unregistered")).toBe("standard");
+          expect(res.status).toBe("unconfirmed");
+          expect(res.reason).toBe("rename_not_confirmed");
+          expect(res.sessionId).toBe("ses-intended");
+          expect(pm.getSessionPersona("ses-intended")).toBe("master");
         });
 
-        it("5. updateSession failure does not alter persona and propagates error without returning success", async () => {
+        // 5. Response with old or different title -> unconfirmed
+        it("5. Response with divergent title: returns unconfirmed", async () => {
           const { PersonaManager } = await import("../src/persona-manager.js");
           const pm = new PersonaManager();
-          pm.registerSessionPersona("ses-fail-test", "master");
+          pm.registerSessionPersona("ses-divergent-title", "master");
 
           const mockClient = {
-            updateSession: vi.fn().mockRejectedValue(new Error("Network update failed")),
+            updateSession: vi.fn().mockResolvedValue({
+              id: "ses-divergent-title",
+              title: "Old Untouched Title",
+            }),
+          };
+
+          const hooks = await AccelerateOmoPlugin({} as any, {
+            personaManager: pm,
+            openCodeClient: mockClient as any,
+          });
+
+          const renameTool = hooks.tool?.[toolName];
+          const res = JSON.parse(await renameTool?.execute({
+            sessionId: "ses-divergent-title",
+            title: "Requested Brand New Title",
+          }, {} as any));
+
+          expect(res.status).toBe("unconfirmed");
+          expect(res.reason).toBe("rename_not_confirmed");
+          expect(res.requestedTitle).toBe("Requested Brand New Title");
+          expect(pm.getSessionPersona("ses-divergent-title")).toBe("master");
+        });
+
+        // 6. Client exception -> propagates error without returning success or altering persona
+        it("6. Injected client exception: propagates error without returning success or altering persona", async () => {
+          const { PersonaManager } = await import("../src/persona-manager.js");
+          const pm = new PersonaManager();
+          pm.registerSessionPersona("ses-throw-test", "master");
+
+          const mockClient = {
+            updateSession: vi.fn().mockRejectedValue(new Error("Daemon socket hang up")),
           };
 
           const hooks = await AccelerateOmoPlugin({} as any, {
@@ -391,81 +447,145 @@ describe("Plugin Registered Tools (acc_dispatch_worker & acc_approve_plane_sync)
           const renameTool = hooks.tool?.[toolName];
           await expect(
             renameTool?.execute({
-              sessionId: "ses-fail-test",
-              title: "Any Title",
-            }, { sessionID: "ses-caller" } as any)
-          ).rejects.toThrow("Network update failed");
+              sessionId: "ses-throw-test",
+              title: "Failing Title",
+            }, {} as any)
+          ).rejects.toThrow("Daemon socket hang up");
 
-          // Persona must remain untouched
-          expect(pm.getSessionPersona("ses-fail-test")).toBe("master");
+          expect(pm.getSessionPersona("ses-throw-test")).toBe("master");
         });
 
-        it("6. Omitted sessionId resolves context.sessionID; explicit sessionId maintains selection", async () => {
+        // 7. Real OpenCodeClient with simulated fetch (HTTP 404, network reject, invalid JSON body)
+        it("7. Real OpenCodeClient with simulated fetch: HTTP errors and network rejections arrive as unconfirmed with zero real network", async () => {
+          const { OpenCodeClient } = await import("../src/opencode-client.js");
           const { PersonaManager } = await import("../src/persona-manager.js");
           const pm = new PersonaManager();
-          pm.registerSessionPersona("ses-context", "master");
-          pm.registerSessionPersona("ses-explicit", "worker");
+          pm.registerSessionPersona("ses-real-client", "worker");
 
-          const mockClient = {
-            updateSession: vi.fn().mockResolvedValue({ id: "ok" }),
-          };
-
-          const hooks = await AccelerateOmoPlugin({} as any, {
-            personaManager: pm,
-            openCodeClient: mockClient as any,
+          // Case 7a: HTTP 404 Not Found
+          const fetchMock404 = vi.fn().mockResolvedValue({
+            ok: false,
+            status: 404,
+            text: async () => "Session not found",
           });
+          const client404 = new OpenCodeClient({ baseUrl: "http://127.0.0.1:9999", fetch: fetchMock404 as any });
+          const hooks404 = await AccelerateOmoPlugin({} as any, { personaManager: pm, openCodeClient: client404 });
+          const res404 = JSON.parse(await hooks404.tool?.[toolName]?.execute({
+            sessionId: "ses-real-client",
+            title: "Title 404",
+          }, {} as any));
+          expect(res404.status).toBe("unconfirmed");
+          expect(res404.reason).toBe("rename_not_confirmed");
 
-          const renameTool = hooks.tool?.[toolName];
+          // Case 7b: Network transport rejection
+          const fetchMockReject = vi.fn().mockRejectedValue(new Error("ECONNREFUSED 127.0.0.1:9999"));
+          const clientReject = new OpenCodeClient({ baseUrl: "http://127.0.0.1:9999", fetch: fetchMockReject as any });
+          const hooksReject = await AccelerateOmoPlugin({} as any, { personaManager: pm, openCodeClient: clientReject });
+          const resReject = JSON.parse(await hooksReject.tool?.[toolName]?.execute({
+            sessionId: "ses-real-client",
+            title: "Title Reject",
+          }, {} as any));
+          expect(resReject.status).toBe("unconfirmed");
+          expect(resReject.reason).toBe("rename_not_confirmed");
 
-          // Omitted sessionId
-          const resCtxStr = await renameTool?.execute({
-            title: "Title From Context",
-          }, { sessionID: "ses-context" } as any);
-          const resCtx = JSON.parse(resCtxStr);
-          expect(resCtx.sessionId).toBe("ses-context");
-          expect(mockClient.updateSession).toHaveBeenCalledWith("ses-context", { title: "Title From Context" });
+          // Case 7c: Corrupted non-JSON body
+          const fetchMockBadJson = vi.fn().mockResolvedValue({
+            ok: true,
+            status: 200,
+            json: async () => { throw new Error("Unexpected token < in JSON"); },
+          });
+          const clientBadJson = new OpenCodeClient({ baseUrl: "http://127.0.0.1:9999", fetch: fetchMockBadJson as any });
+          const hooksBadJson = await AccelerateOmoPlugin({} as any, { personaManager: pm, openCodeClient: clientBadJson });
+          const resBadJson = JSON.parse(await hooksBadJson.tool?.[toolName]?.execute({
+            sessionId: "ses-real-client",
+            title: "Title Bad JSON",
+          }, {} as any));
+          expect(resBadJson.status).toBe("unconfirmed");
+          expect(resBadJson.reason).toBe("rename_not_confirmed");
 
-          // Explicit sessionId
-          const resExpStr = await renameTool?.execute({
-            sessionId: "ses-explicit",
-            title: "Title Explicit",
-          }, { sessionID: "ses-context" } as any);
-          const resExp = JSON.parse(resExpStr);
-          expect(resExp.sessionId).toBe("ses-explicit");
-          expect(mockClient.updateSession).toHaveBeenCalledWith("ses-explicit", { title: "Title Explicit" });
-
-          // Missing both
-          await expect(
-            renameTool?.execute({ title: "No Session Anywhere" }, {} as any)
-          ).rejects.toThrow(/Missing sessionId/);
+          expect(pm.getSessionPersona("ses-real-client")).toBe("worker");
         });
 
-        it("7. Repeated calls on same instance preserve registered personas without cumulative reclassification", async () => {
+        // 8. Persona preservation across Master, Worker and Unregistered sessions
+        it("8. Neither confirmed nor unconfirmed renames attribute, promote or demote personas", async () => {
           const { PersonaManager } = await import("../src/persona-manager.js");
           const pm = new PersonaManager();
-          pm.registerSessionPersona("ses-stable", "worker");
+          pm.registerSessionPersona("ses-master-8", "master");
+          pm.registerSessionPersona("ses-worker-8", "worker");
+          // ses-unregistered-8 has no registration
 
-          const mockClient = {
-            updateSession: vi.fn().mockResolvedValue({ id: "ses-stable" }),
+          const mockClientSuccess = {
+            updateSession: vi.fn().mockImplementation(async (id, body) => ({ id, title: body.title })),
+          };
+          const mockClientNull = {
+            updateSession: vi.fn().mockResolvedValue(null),
           };
 
-          const hooks = await AccelerateOmoPlugin({} as any, {
-            personaManager: pm,
-            openCodeClient: mockClient as any,
-          });
+          const hooksSuccess = await AccelerateOmoPlugin({} as any, { personaManager: pm, openCodeClient: mockClientSuccess as any });
+          const hooksNull = await AccelerateOmoPlugin({} as any, { personaManager: pm, openCodeClient: mockClientNull as any });
 
-          const renameTool = hooks.tool?.[toolName];
-          const titles = ["[MASTER] 1", "⚡ [W-test] 2", "Plain 3", "[MASTER] 4"];
+          // Master confirmed with plain title -> stays master
+          const r1 = JSON.parse(await hooksSuccess.tool?.[toolName]?.execute({ sessionId: "ses-master-8", title: "Plain" }, {} as any));
+          expect(r1.status).toBe("success");
+          expect(r1.persona).toBe("master");
+          expect(pm.getSessionPersona("ses-master-8")).toBe("master");
 
-          for (const title of titles) {
-            const resStr = await renameTool?.execute({
-              sessionId: "ses-stable",
-              title,
-            }, { sessionID: "ses-caller" } as any);
-            const res = JSON.parse(resStr);
-            expect(res.persona).toBe("worker"); // MUST stay worker across all iterations
-            expect(pm.getSessionPersona("ses-stable")).toBe("worker");
-          }
+          // Worker confirmed with [MASTER] title -> stays worker
+          const r2 = JSON.parse(await hooksSuccess.tool?.[toolName]?.execute({ sessionId: "ses-worker-8", title: "[MASTER] Worker" }, {} as any));
+          expect(r2.status).toBe("success");
+          expect(r2.persona).toBe("worker");
+          expect(pm.getSessionPersona("ses-worker-8")).toBe("worker");
+
+          // Unregistered confirmed with [MASTER] title -> stays standard (no direct assignment by handler)
+          const r3 = JSON.parse(await hooksSuccess.tool?.[toolName]?.execute({ sessionId: "ses-unregistered-8", title: "[MASTER] Sneak" }, {} as any));
+          expect(r3.status).toBe("success");
+          expect(r3.persona).toBe("standard");
+          expect(pm.getSessionPersona("ses-unregistered-8")).toBe("standard");
+
+          // Unconfirmed rename on master -> stays master
+          const r4 = JSON.parse(await hooksNull.tool?.[toolName]?.execute({ sessionId: "ses-master-8", title: "Fail" }, {} as any));
+          expect(r4.status).toBe("unconfirmed");
+          expect(r4.persona).toBe("master");
+          expect(pm.getSessionPersona("ses-master-8")).toBe("master");
+        });
+
+        // 9. Repeated calls on same instance: confirmed update does not leak success to subsequent unconfirmed call
+        it("9. Repeated calls on same instance: confirmed update does not make subsequent unconfirmed call appear successful", async () => {
+          const { PersonaManager } = await import("../src/persona-manager.js");
+          const pm = new PersonaManager();
+          pm.registerSessionPersona("ses-repeat-instance", "master");
+
+          let returnSuccess = true;
+          const mockClient = {
+            updateSession: vi.fn().mockImplementation(async (id, body) => {
+              if (returnSuccess) return { id, title: body.title };
+              return null;
+            }),
+          };
+
+          const hooks = await AccelerateOmoPlugin({} as any, { personaManager: pm, openCodeClient: mockClient as any });
+          const tool = hooks.tool?.[toolName];
+
+          // Call 1: Confirmed
+          const r1 = JSON.parse(await tool?.execute({ sessionId: "ses-repeat-instance", title: "Title One" }, {} as any));
+          expect(r1.status).toBe("success");
+          expect(r1.title).toBe("Title One");
+
+          // Call 2: Unconfirmed (daemon fails)
+          returnSuccess = false;
+          const r2 = JSON.parse(await tool?.execute({ sessionId: "ses-repeat-instance", title: "Title Two" }, {} as any));
+          expect(r2.status).toBe("unconfirmed");
+          expect(r2.reason).toBe("rename_not_confirmed");
+          expect(r2.requestedTitle).toBe("Title Two");
+          expect(r2.title).toBeUndefined();
+
+          // Call 3: Confirmed again
+          returnSuccess = true;
+          const r3 = JSON.parse(await tool?.execute({ sessionId: "ses-repeat-instance", title: "Title Three" }, {} as any));
+          expect(r3.status).toBe("success");
+          expect(r3.title).toBe("Title Three");
+
+          expect(pm.getSessionPersona("ses-repeat-instance")).toBe("master");
         });
       });
     }
